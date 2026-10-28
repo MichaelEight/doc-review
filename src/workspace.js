@@ -5,6 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { resolveAnchor, makeAnchor, lineOf, extractRefs } from "../web/anchor.js";
 import { offsetMapper, mapRange } from "../web/remap.js";
+import { parseCommand } from "../web/commands.js";
 
 export const EDITABLE = new Set([".md", ".markdown", ".txt", ".tex", ".bib"]);
 const SKIP_DIRS = new Set(["node_modules", ".git", ".doc-review", "dist", "build", "__pycache__", ".venv", "venv"]);
@@ -460,6 +461,12 @@ export class Workspace {
       out.original_quote = t.anchor.quote;
     }
     out.messages = t.messages.map((m) => ({ author: m.author, kind: m.kind, text: m.text, new: m.state === "submitted" || undefined }));
+    // A new user message starting with a slash command: hand the agent the command and what it means.
+    const latest = [...t.messages].reverse().find((m) => m.author === "user" && m.state === "submitted");
+    const cmd = latest && parseCommand(latest.text);
+    if (cmd) {
+      out.command = { name: cmd.name, args: cmd.args || undefined, extra: cmd.note || undefined, action: cmd.def.action, instructions: cmd.def.instructions };
+    }
     return out;
   }
 
@@ -494,7 +501,9 @@ export class Workspace {
       next:
         "Work through every comment: edit the files directly, then for each comment call review_resolve (with a short note such as " +
         "\"Corrected\") or review_reply (kind=question if you need an answer; kind=note to explain without resolving). When all are " +
-        "handled call review_finish with a one-line summary, then review_wait again for the next round.",
+        "handled call review_finish with a one-line summary, then review_wait again for the next round. A comment with a " +
+        "`command` field is a slash command: follow command.instructions with command.args (action edit = change the file and " +
+        "resolve; reply = answer in the thread only; confirm = propose with kind=question and edit only after the user agrees).",
     };
   }
 }

@@ -41,15 +41,39 @@ node src/server.js --serve ~/path/to/folder
 
 | Action | How |
 |---|---|
-| Comment on text | Select it, click the **+** in the margin (or ⌘⌥M) |
+| Comment on text | Select it, click **Comment** in the margin (or ⌘⌥M) |
 | Comment at a spot | Click anywhere in the page, then **+** |
 | Reply / answer the AI | Click the card, type, ⌘↵ |
 | Bigger conversation | ⤢ on a card opens it as a popup |
 | @file, #tag | Type `@` or `#` in a comment to autocomplete |
+| Commands | Start a comment with `/` (see below) |
 | Send | **Send to AI** (⌘⇧↵) |
 | Formatting | ⌘B bold, ⌘I italic, ⌘U underline, ⌘⇧X strikethrough, ⌘E code, ⌘K link, ⌘⌥1–3 headings, ⌘⇧8 / ⌘⇧7 lists, Tab / ⇧Tab indent. These work in Edit, and on a selection in Read. Markdown and LaTeX markup as appropriate. |
 | Review AI edits | **Changes** tab: hover a change for Accept / Revert, or Accept all / Revert all |
 | LaTeX | **Source** to edit and comment, **PDF** to compile and preview |
+
+### Commands
+
+Start a comment with `/` to pick a command. The menu shows each command's parameters and
+examples. The command applies to the selected text; for a click comment, to the paragraph around
+the spot; add `all` (for `/fix`) to cover the whole file.
+
+| Command | What the AI does |
+|---|---|
+| `/fix [all]` | Fixes grammar, spelling and punctuation only, with minimal changes |
+| `/simplify [how]` | Plainer words and shorter sentences, same meaning |
+| `/explain [question]` | Explains briefly in the thread; no edit |
+| `/rewrite [tone]` | Rephrases in a tone (`formal`, `casual`, …) |
+| `/shorten [target]` | Shortens (`50%`, `40 words`, `one sentence`) |
+| `/expand [what]` | Adds detail or an example |
+| `/translate <language>` | Translates in place |
+| `/format <as>` | Converts to `list`, `table`, `latex`, `code`, … |
+| `/continue [direction]` | Writes the next part from this point |
+| `/summarize [length]` | Inserts a short summary at the comment |
+| `/check [what]` | Fact-checks; replies with a verdict and sources |
+| `/define [term]` | Proposes a footnote or glossary entry, adds it once you agree |
+| `/consistency [@file]` | Makes terms, spelling and tense consistent, optionally against another file |
+| `/graph [what]` | Plots the data with matplotlib into `figures/` and inserts the image |
 
 Editing is locked while the AI is working (comments still work) and while there are AI changes
 waiting for review. This keeps your edits from mixing into the AI's diff.

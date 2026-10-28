@@ -32,6 +32,27 @@ make the edits, and answer each comment in its thread.
    the user accepts or reverts each change.
 5. `review_wait()` again for the next round. Stop when the user says they're done in chat.
 
+## Slash commands
+
+A comment can start with a command, such as `/fix`, `/shorten 50%` or `/translate Polish`. The
+entry in `comments` then has a `command` object: `name`, `args`, optional `extra` (any lines
+after the first) and `instructions`, which say exactly what to do. Follow those instructions and
+apply them to the comment's scope: the selection, or the paragraph around a point comment.
+
+What to do depends on `action`:
+
+- `edit`: change the file, then `review_resolve` with what you did.
+- `reply`: answer in the thread only (`/explain`, `/check`), without editing the file.
+- `confirm`: propose with `kind: "question"` (`/define`), and edit only after the user agrees in
+  a later round.
+
+The commands are `/fix`, `/simplify`, `/explain`, `/rewrite`, `/shorten`, `/expand`,
+`/translate`, `/format`, `/continue`, `/summarize`, `/check`, `/define`, `/consistency` and
+`/graph`.
+
+`/graph` writes `figures/<name>.py` and `figures/<name>.png` next to the document with
+matplotlib, then inserts the image. Ask the user before installing matplotlib if it is missing.
+
 ## References inside comments
 
 - `@path/file`: a workspace file, resolved for you in `referenced_files`. Read it when the

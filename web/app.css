@@ -618,6 +618,29 @@ img.hl-ai, .math.hl-ai { outline-color: var(--hl-ai-line); }
 .ac-item small { color: var(--muted); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .ac-item .sym { font: 650 12px var(--mono); color: var(--muted); width: 14px; }
 
+/* Slash commands: list on the left, help for the highlighted command on the right. */
+.autocomplete.cmd { max-width: none; width: 560px; max-height: 300px; padding: 0; overflow: hidden; }
+.autocomplete.cmd.on { display: flex; }
+.autocomplete.cmd .ac-list { width: 250px; flex: none; overflow: auto; padding: 5px; border-right: 1px solid var(--line); }
+.autocomplete.cmd .ac-item small { max-width: 120px; }
+.autocomplete.hint { width: 300px; }
+.ac-detail { flex: 1; min-width: 0; padding: 12px 14px; overflow: auto; font-size: 13px; line-height: 1.45; }
+.ac-detail .sig { font: 13.5px var(--mono); margin-bottom: 4px; }
+.ac-detail .sig span { color: var(--muted); }
+.ac-detail p { margin: 0 0 8px; color: var(--ink-2); }
+.ac-detail dl { margin: 10px 0 0; }
+.ac-detail dt { font: 600 12.5px var(--mono); }
+.ac-detail dt small { font: 500 11px var(--ui); color: var(--muted); }
+.ac-detail dd { margin: 2px 0 8px; color: var(--ink-2); }
+.ac-detail .ex { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.ac-detail code { font: 12px var(--mono); background: var(--hover); border-radius: 5px; padding: 2px 6px; }
+.act { display: inline-block; font: 650 10.5px var(--ui); letter-spacing: 0.04em; text-transform: uppercase; border-radius: 5px; padding: 2px 6px; }
+.act-edit { color: var(--accent); background: var(--accent-soft); }
+.act-reply { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.act-confirm { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.chip-cmd { font: 650 0.92em var(--mono); border-radius: 6px; padding: 1px 6px; }
+@media (max-width: 640px) { .autocomplete.cmd { width: calc(100vw - 20px); } .autocomplete.cmd .ac-detail { display: none; } }
+
 /* ---------- toasts ---------- */
 
 .toasts { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 70; pointer-events: none; }

@@ -4,6 +4,7 @@ import { makeAnchor, resolveAnchor, lineOf } from "./anchor.js";
 import { offsetMapper, mapRange } from "./remap.js";
 import { diffLines, diffWords, acceptHunk, revertHunk, splitLines } from "./diff.js";
 import { shortcut, command } from "./format.js";
+import { COMMANDS, ACTION_LABEL, findCommand, parseCommand } from "./commands.js";
 
 // ---------- basics ----------
 
@@ -53,6 +54,17 @@ async function api(method, path, body) {
   return data;
 }
 const rawUrl = (p) => `/api/raw?ws=${WS}&t=${TOKEN}&path=${encodeURIComponent(p)}`;
+
+// Image paths in a document are relative to that document, not to the workspace root.
+function relToFile(p) {
+  if (p.startsWith("/")) return p.slice(1);
+  const out = (S.file || "").split("/").slice(0, -1);
+  for (const part of p.split("/")) {
+    if (part === "..") out.pop();
+    else if (part && part !== ".") out.push(part);
+  }
+  return out.join("/");
+}
 
 const store = {
   get(k, d) {
@@ -341,7 +353,7 @@ function viewEl() {
 
 function renderDoc() {
   const tree = S.kind === "md" ? parseMarkdown(S.text) : parsePlain(S.text);
-  const dom = renderTree(tree, rangesForRender(), rawUrl);
+  const dom = renderTree(tree, rangesForRender(), (p) => rawUrl(relToFile(p)));
   const doc = $("doc");
   // Re-rendering replaces the text nodes; carry a live selection over to the new ones.
   const sel = window.getSelection();
@@ -744,6 +756,11 @@ const rel = (iso) => {
 function richText(text) {
   const files = new Set(S.files.map((f) => f.path));
   let html = esc(text);
+  const cmd = parseCommand(text);
+  if (cmd) {
+    html = html.replace(/^(\s*)\/[\w-]+/, (m, pre) =>
+      `${pre}<span class="chip-cmd act-${cmd.def.action}" title="${esc(cmd.def.summary + " · " + ACTION_LABEL[cmd.def.action])}">/${cmd.name}</span>`);
+  }
   html = html.replace(/(^|[\s(])(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
   html = html.replace(/(^|[\s(])@([\w./-]*[\w/])/g, (m, pre, p) =>
     `${pre}<span class="chip-ref" data-file="${files.has(p) ? p : ""}" title="${files.has(p) ? "Open " + p : p}">@${p}</span>`);
@@ -807,7 +824,7 @@ function composer({ placeholder, value = "", onSubmit, onCancel, submitLabel = "
   queueMicrotask(fit);
   return h("div", { class: "composer", onclick: (e) => e.stopPropagation() }, ta,
     h("div", { class: "composer-actions" },
-      h("span", { class: "composer-hint" }, "@ file · # tag · ⌘↵"),
+      h("span", { class: "composer-hint" }, "/ command · @ file · # tag · ⌘↵"),
       onCancel ? h("button", { class: "btn ghost small", onclick: (e) => (e.stopPropagation(), onCancel()) }, "Cancel") : null,
       btn));
 }
@@ -1138,15 +1155,22 @@ function closeModal(instant = false) {
 
 $("modalBackdrop").addEventListener("click", () => closeModal());
 
-// ---------- @ / # autocomplete ----------
+// ---------- @ / # / slash-command autocomplete ----------
 
 const ac = $("ac");
 let acState = null;
 
+function acPlace(ta, width, height) {
+  const r = ta.getBoundingClientRect();
+  ac.style.left = Math.max(8, Math.min(window.innerWidth - width - 10, r.left)) + "px";
+  const below = r.bottom + 6;
+  ac.style.top = (below + height > window.innerHeight ? Math.max(8, r.top - height - 6) : below) + "px";
+}
+
 function acInput(ta) {
   const before = ta.value.slice(0, ta.selectionStart);
   const m = /(^|[\s(])([@#])([\w./-]*)$/.exec(before);
-  if (!m) return acClose();
+  if (!m) return acCommand(ta, before);
   const [, , sigil, q] = m;
   const ql = q.toLowerCase();
   let items;
@@ -1159,14 +1183,59 @@ function acInput(ta) {
   }
   if (!items.length) return acClose();
   acState = { ta, sigil, start: ta.selectionStart - q.length, items, i: 0 };
-  const r = ta.getBoundingClientRect();
-  ac.style.left = Math.min(window.innerWidth - 370, r.left) + "px";
-  const below = r.bottom + 6;
-  ac.style.top = (below + 260 > window.innerHeight ? Math.max(8, r.top - 266) : below) + "px";
+  ac.classList.remove("cmd", "hint");
+  acPlace(ta, 360, 260);
   acRender();
 }
 
+// "/" at the start of a comment lists the commands; once one is typed, its parameter help stays
+// up while the arguments are written on the first line.
+function acCommand(ta, before) {
+  const list = /^\/([\w-]*)$/.exec(before);
+  if (list) {
+    const q = list[1].toLowerCase();
+    const items = [...COMMANDS.filter((c) => c.name.startsWith(q)), ...(q.length > 1 ? COMMANDS.filter((c) => !c.name.startsWith(q) && c.name.includes(q)) : [])]
+      .map((c) => ({ value: c.name, label: c.name, def: c }));
+    if (!items.length) return acClose();
+    const keep = acState?.sigil === "/" ? items.findIndex((it) => it.value === acState.items[acState.i]?.value) : -1;
+    acState = { ta, sigil: "/", start: 1, items, i: Math.max(0, keep) };
+    ac.classList.add("cmd");
+    ac.classList.remove("hint");
+    acPlace(ta, 560, 300);
+    return acRender();
+  }
+  const typed = !before.includes("\n") && /^\/([\w-]+)\s/.exec(before);
+  const def = typed && findCommand(typed[1]);
+  if (!def) return acClose();
+  acState = { ta, hint: def };
+  ac.classList.add("cmd", "hint");
+  acPlace(ta, 300, 220);
+  ac.replaceChildren(cmdDetail(def));
+  ac.classList.add("on");
+}
+
+function cmdDetail(c) {
+  return h("div", { class: "ac-detail" },
+    h("div", { class: "sig" }, h("b", {}, "/" + c.name), c.args ? h("span", {}, " " + c.args) : null),
+    h("p", {}, c.summary),
+    h("span", { class: "act act-" + c.action }, ACTION_LABEL[c.action]),
+    h("dl", {}, ...c.params.flatMap((p) => [
+      h("dt", {}, p.name, p.optional ? h("small", {}, " optional") : null),
+      h("dd", {}, p.desc)])),
+    h("div", { class: "ex" }, ...c.examples.map((e) => h("code", {}, e))));
+}
+
 function acRender() {
+  if (acState.sigil === "/") {
+    const list = h("div", { class: "ac-list" }, ...acState.items.map((it, k) =>
+      h("div", { class: "ac-item" + (k === acState.i ? " on" : ""), onmousedown: (e) => (e.preventDefault(), acPick(k)),
+        onmousemove: () => k !== acState.i && ((acState.i = k), acRender()) },
+        h("span", { class: "sym" }, "/"), h("span", {}, it.label), h("small", {}, it.def.summary))));
+    ac.replaceChildren(list, cmdDetail(acState.items[acState.i].def));
+    ac.classList.add("on");
+    list.children[acState.i]?.scrollIntoView({ block: "nearest" });
+    return;
+  }
   ac.replaceChildren(...acState.items.map((it, k) =>
     h("div", { class: "ac-item" + (k === acState.i ? " on" : ""), onmousedown: (e) => (e.preventDefault(), acPick(k)) },
       h("span", { class: "sym" }, acState.sigil), h("span", {}, it.label), it.hint && it.hint !== it.label ? h("small", {}, it.hint) : null)));
@@ -1191,6 +1260,13 @@ function acClose() {
 
 function acKeydown(e) {
   if (!acState || e.target !== acState.ta) return false;
+  if (acState.hint) {
+    if (e.key !== "Escape") return false;
+    e.preventDefault();
+    e.stopPropagation();
+    acClose();
+    return true;
+  }
   if (e.metaKey || e.ctrlKey) {
     acClose();
     return false;
