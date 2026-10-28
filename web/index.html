@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Doc Review</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f5bd5'/%3E%3Cpath d='M9 10h14M9 15h14M9 20h9' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="top">
+    <button class="icon-btn" id="sidebarToggle" title="Files">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+    </button>
+    <div class="crumbs">
+      <span class="ws-name" id="wsName"></span>
+      <span class="crumb-sep">/</span>
+      <span class="file-name" id="fileName">—</span>
+      <span class="save-state" id="saveState"></span>
+    </div>
+    <div class="modes" id="modes" role="tablist"></div>
+    <div class="top-right">
+      <span class="agent-pill" id="agentPill"><i></i><span></span></span>
+      <button class="btn primary big" id="sendBtn" disabled title="Send comments to the AI (⌘⇧↵)">
+        <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+        <span>Send to AI</span>
+        <b class="count" id="sendCount"></b>
+      </button>
+    </div>
+  </header>
+  <div class="work-banner" id="workBanner"><span class="shimmer"></span><span id="workText">AI is working on your comments. Editing is paused.</span></div>
+
+  <div class="body">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-search"><input id="fileFilter" placeholder="Filter files" spellcheck="false"></div>
+      <nav class="file-list" id="fileList"></nav>
+      <label class="side-toggle"><input type="checkbox" id="showResolved" checked> Show resolved</label>
+    </aside>
+    <main class="scroller" id="scroller">
+      <div class="page" id="page">
+        <div class="doc-col" id="docCol">
+          <article class="doc" id="doc"></article>
+          <div class="src" id="srcWrap">
+            <div class="backdrop" id="backdrop" aria-hidden="true"></div>
+            <textarea id="src" spellcheck="true" autocomplete="off" autocapitalize="off"></textarea>
+          </div>
+          <div class="changes" id="changes"></div>
+          <div class="pdf" id="pdfWrap">
+            <div class="pdf-status" id="pdfStatus"></div>
+            <iframe id="pdf" title="PDF preview"></iframe>
+          </div>
+          <div class="empty" id="empty">
+            <h2>Pick a file</h2>
+            <p>Open a <code>.md</code>, <code>.txt</code> or <code>.tex</code> file from the list. Select text and press the <b>+</b> in the margin to comment, or click an empty spot to comment there.</p>
+          </div>
+        </div>
+        <div class="margin" id="margin"></div>
+      </div>
+    </main>
+  </div>
+
+  <button class="add-chip" id="addChip" title="Add comment (⌘⌥M)">
+    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M12 8v8M8 12h8"/></svg>
+  </button>
+
+  <div class="modal-backdrop" id="modalBackdrop"></div>
+  <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+  <div class="autocomplete" id="ac"></div>
+  <div class="toasts" id="toasts"></div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

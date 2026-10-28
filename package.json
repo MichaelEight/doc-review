@@ -1,0 +1,14 @@
+{
+  "name": "mcp-doc-review",
+  "version": "0.1.0",
+  "description": "MCP server + local web UI: comment on .md/.txt/.tex files Google-Docs-style and hand the comments to the AI.",
+  "type": "module",
+  "bin": { "mcp-doc-review": "src/server.js" },
+  "scripts": {
+    "start": "node src/server.js",
+    "serve": "node src/server.js --serve",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}

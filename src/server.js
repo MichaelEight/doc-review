@@ -1,0 +1,123 @@
+#!/usr/bin/env node
+// MCP server (stdio, newline-delimited JSON-RPC 2.0) + local web UI for commenting on documents and
+// handing the comments to the AI. Zero dependencies on purpose, like mcp-time-estimator.
+//
+//   node src/server.js                 MCP over stdio (what `claude mcp add` runs)
+//   node src/server.js --serve <dir>   UI only, no agent: comments queue until an agent calls review_wait
+import readline from "node:readline";
+import path from "node:path";
+import { TOOLS, makeHandlers } from "./tools.js";
+import { ReviewHttp } from "./http.js";
+import { Workspace } from "./workspace.js";
+
+export const SERVER_INFO = { name: "doc-review", version: "0.1.0" };
+const SUPPORTED = ["2025-06-18", "2025-03-26", "2024-11-05"];
+
+export const INSTRUCTIONS =
+  "Lets the user review a document in a local web UI (Google-Docs-style margin comments on .md/.txt/.tex) and hand the " +
+  "comments to you. Loop: review_open(path) -> tell the user the URL -> review_wait (blocks until they press Send to AI) -> " +
+  "edit the files to address each comment -> review_resolve each one with a short note, or review_reply kind=question " +
+  "when you need an answer -> review_finish(summary) -> review_wait again. @path in a comment refers to a workspace file; " +
+  "#tag to a concept defined with review_define_tag. On {status:\"timeout\"} just call review_wait again.";
+
+export function createServer({ write = () => {} } = {}) {
+  const registry = new Map();
+  const http = new ReviewHttp(registry);
+  const handlers = makeHandlers(registry, http);
+  const inflight = new Map();
+
+  async function handle(msg) {
+    const { id, method, params } = msg;
+    const isRequest = id !== undefined && id !== null;
+    const reply = (result) => (isRequest ? { jsonrpc: "2.0", id, result } : null);
+    const fail = (code, message) => (isRequest ? { jsonrpc: "2.0", id, error: { code, message } } : null);
+
+    switch (method) {
+      case "initialize": {
+        const wanted = params?.protocolVersion;
+        return reply({
+          protocolVersion: SUPPORTED.includes(wanted) ? wanted : SUPPORTED[0],
+          capabilities: { tools: { listChanged: false } },
+          serverInfo: SERVER_INFO,
+          instructions: INSTRUCTIONS,
+        });
+      }
+      case "notifications/initialized":
+        return null;
+      case "notifications/cancelled":
+        inflight.get(params?.requestId)?.abort();
+        return null;
+      case "ping":
+        return reply({});
+      case "tools/list":
+        return reply({ tools: TOOLS });
+      case "tools/call": {
+        const fn = handlers[params?.name];
+        if (!fn) return fail(-32602, `unknown tool: ${params?.name}`);
+        const ac = new AbortController();
+        inflight.set(id, ac);
+        // Keep long review_wait calls alive in clients that reset their timeout on progress.
+        const token = params?._meta?.progressToken;
+        let n = 0;
+        const beat = token != null
+          ? setInterval(() => write({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: token, progress: ++n, message: "waiting for the user" } }), 25_000)
+          : null;
+        try {
+          const result = await fn(params.arguments ?? {}, { signal: ac.signal });
+          return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 1) }] });
+        } catch (err) {
+          return reply({ content: [{ type: "text", text: `error: ${err.message}` }], isError: true });
+        } finally {
+          clearInterval(beat);
+          inflight.delete(id);
+        }
+      }
+      default:
+        return fail(-32601, `method not found: ${method}`);
+    }
+  }
+
+  const close = () => {
+    for (const ws of registry.values()) ws.close();
+    http.close();
+  };
+
+  return { handle, registry, http, close };
+}
+
+function mainStdio() {
+  const write = (obj) => process.stdout.write(JSON.stringify(obj) + "\n");
+  const server = createServer({ write });
+  const rl = readline.createInterface({ input: process.stdin });
+  rl.on("line", async (line) => {
+    if (!line.trim()) return;
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } });
+      return;
+    }
+    const out = await server.handle(msg);
+    if (out) write(out);
+  });
+  rl.on("close", () => {
+    server.close();
+    process.exit(0);
+  });
+}
+
+async function mainServe(dir) {
+  const server = createServer();
+  const ws = new Workspace(path.resolve(dir));
+  server.registry.set(ws.id, ws);
+  await server.http.listen();
+  console.log(`doc-review: ${server.http.url(ws)}`);
+}
+
+const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("server.js");
+if (isMain) {
+  const i = process.argv.indexOf("--serve");
+  if (i >= 0) mainServe(process.argv[i + 1] || ".");
+  else mainStdio();
+}
