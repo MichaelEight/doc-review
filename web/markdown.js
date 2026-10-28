@@ -194,7 +194,9 @@ export function parseInline(str, m, a = 0, b = str.length) {
         }
       }
     }
-    if (c === "\n" && str[i - 1] === " " && str[i - 2] === " ") {
+    // Every newline inside a paragraph is a visible line break (poems, addresses, notes), not
+    // CommonMark's soft break that joins lines into one.
+    if (c === "\n") {
       flush(i);
       out.push(el("br", m[i], m[i] + 1));
       i++;

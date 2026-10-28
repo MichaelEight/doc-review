@@ -23,6 +23,16 @@ test("markdown runs map exactly to source offsets", () => {
   for (const t of ['"h1"', '"strong"', '"code"', '"a"', '"math"', '"ul"', '"li"', '"blockquote"', '"table"', '"pre"']) assert.ok(tags.includes(t), t);
 });
 
+test("single newlines in a paragraph render as line breaks", () => {
+  const src = "The oak wakes slow,\na **thousand** leaves;\na sparrow lands.\n";
+  const tree = parseMarkdown(src);
+  const p = tree.children[0];
+  const brs = p.children.filter((c) => c.tag === "br");
+  assert.equal(brs.length, 2);
+  for (const br of brs) assert.equal(src[br.s], "\n");
+  for (const r of runs(tree)) assert.equal(src.slice(r.s, r.s + r.run.length), r.run);
+});
+
 test("anchors survive edits around them and pick the right duplicate", () => {
   const text = "alpha beta gamma. alpha beta delta.";
   const a = makeAnchor(text, 18, 28); // second "alpha beta"

@@ -31,6 +31,8 @@ export class Workspace {
     this.listeners = new Set();
     this.waiters = [];
     this.aiWorking = false;
+    // True once an AI session opened this folder through review_open (false under --serve).
+    this.agentAttached = false;
     this.lastSummary = null;
     this.load();
     for (const t of this.state.threads) this.known(t.file);
@@ -178,6 +180,7 @@ export class Workspace {
   status() {
     return {
       aiWorking: this.aiWorking,
+      agentAttached: this.agentAttached,
       agentWaiting: this.waiters.length > 0,
       pending: this.state.threads.filter((t) => t.messages.some((m) => m.state === "pending")).length,
       lastSummary: this.lastSummary,

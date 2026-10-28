@@ -200,14 +200,19 @@ function connectEvents() {
 function setStatus(st) {
   const pill = $("agentPill");
   pill.className = "agent-pill";
-  let label;
-  if (st.offline) label = "Server offline";
-  else if (st.aiWorking) (pill.classList.add("working"), (label = "AI working"));
-  else if (st.agentWaiting) (pill.classList.add("listening"), (label = "AI listening"));
-  else label = "AI not connected";
+  // Four states, from the server's point of view:
+  //   editing    the AI received your comments and has not finished the round
+  //   listening  the AI is blocked in review_wait; Send delivers instantly
+  //   away       an AI session opened this folder but is not waiting right now (busy, or talking in chat)
+  //   no AI      page started with --serve; comments queue in .doc-review/ until an AI opens the folder
+  const [cls, label, tip] = st.offline ? ["", "Server offline", "Lost the connection to the doc-review server."]
+    : st.aiWorking ? ["working", "AI editing", "The AI is working on the comments you sent. Editing is paused until it finishes."]
+    : st.agentWaiting ? ["listening", "AI listening", "The AI is waiting. Send to AI delivers your comments right away."]
+    : st.agentAttached ? ["away", "AI away", "An AI session has this folder open but is not waiting for comments right now. Anything you send is queued and delivered when it listens again."]
+    : ["", "No AI session", "This page was opened without an AI. Comments you send are saved in the folder and delivered when an AI opens it with doc-review."];
+  if (cls) pill.classList.add(cls);
   pill.querySelector("span").textContent = label;
-  pill.title = st.agentWaiting ? "The AI is waiting for your comments." : st.aiWorking ? "The AI is working on the comments you sent." :
-    "No AI is listening right now. Sent comments are queued until it calls review_wait.";
+  pill.title = tip;
   if (st.offline) return;
   const wasWorking = S.aiWorking;
   S.aiWorking = !!st.aiWorking;
@@ -524,7 +529,8 @@ const chip = $("addChip");
 function showChip(sel, y) {
   const margin = $("margin").getBoundingClientRect();
   const top = Math.max(70, Math.min(window.innerHeight - 60, y - 6));
-  chip.style.left = margin.left - 21 - 14 + "px";
+  // Sits at the head of the margin, where the new comment card will open.
+  chip.style.left = margin.left + 8 + "px";
   chip.style.top = top + "px";
   chip.classList.add("on");
   S.chip = sel;

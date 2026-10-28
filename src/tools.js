@@ -145,6 +145,8 @@ export function makeHandlers(registry, http) {
       const id = workspaceId(root);
       let ws = registry.get(id);
       if (!ws) registry.set(id, (ws = new Workspace(root)));
+      ws.agentAttached = true;
+      ws.emitStatus();
       await http.listen();
       const url = http.url(ws, isFile ? ws.rel(abs) : null);
       if (open_browser && process.platform === "darwin") execFile("open", [url], () => {});

@@ -146,6 +146,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .agent-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); transition: background 0.3s; }
 .agent-pill.listening i { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent); }
+.agent-pill.away i { background: var(--warn); }
 .agent-pill.working i { background: var(--hl-ai-line); animation: pulse 1.2s var(--ease) infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--hl-ai-line) 0%, transparent); transform: scale(0.85); } 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hl-ai-line) 45%, transparent); } }
 
@@ -546,12 +547,16 @@ img.hl-ai, .math.hl-ai { outline-color: var(--hl-ai-line); }
 .add-chip {
   position: fixed;
   z-index: 30;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
+  height: 40px;
+  padding: 0 16px 0 10px;
+  border-radius: 20px;
   border: 0;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 600 14px/1 var(--ui);
+  letter-spacing: 0.01em;
+  transform-origin: left center;
   background: var(--accent);
   color: var(--accent-ink);
   box-shadow: var(--shadow-2);
@@ -562,8 +567,11 @@ img.hl-ai, .math.hl-ai { outline-color: var(--hl-ai-line); }
   transition: transform 0.22s var(--ease), opacity 0.18s;
 }
 .add-chip.on { transform: none; opacity: 1; pointer-events: auto; }
-.add-chip:hover { transform: scale(1.07); }
-.add-chip svg { width: 20px; height: 20px; }
+.add-chip:hover { transform: translateY(-1px); box-shadow: var(--shadow-2), 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent); }
+.add-chip:active { transform: scale(0.97); }
+.add-chip svg { width: 24px; height: 24px; }
+.add-chip .bubble { fill: currentColor; stroke: none; }
+.add-chip .plus { stroke: var(--accent); stroke-width: 2.4; }
 
 /* ---------- modal ---------- */
 
