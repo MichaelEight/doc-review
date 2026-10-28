@@ -5,6 +5,8 @@ import { offsetMapper, mapRange } from "./remap.js";
 import { diffLines, diffWords, acceptHunk, revertHunk, splitLines } from "./diff.js";
 import { shortcut, command } from "./format.js";
 import { COMMANDS, ACTION_LABEL, findCommand, parseCommand } from "./commands.js";
+import { renderPdf, pageAt, toPdf, rangeRects, paintMarks, marksAt } from "./pdfview.js";
+import { matchInSource, pointInSource } from "./pdfmatch.js";
 
 // ---------- basics ----------
 
@@ -155,6 +157,7 @@ async function refreshState() {
   S.tags = st.tags;
   S.baselines = new Set(st.baselines);
   S.latex = st.latex;
+  S.synctex = st.synctex;
   $("wsName").textContent = st.name;
   document.title = `${st.name} · Doc Review`;
   setStatus(st);
@@ -276,6 +279,8 @@ async function openFile(path) {
   S.undo = [];
   S.file = path;
   S.kind = kindOf(path);
+  $("pdfPages").replaceChildren();
+  S.pdfBoxes = new Map();
   store.set("lastFile:" + WS, path);
   const url = new URL(location.href);
   url.searchParams.set("file", path);
@@ -342,11 +347,12 @@ function renderView() {
   if (S.mode === "read") renderDoc();
   else if (S.mode === "edit") renderSource();
   else if (S.mode === "changes") renderChanges();
-  if (S.mode === "read" || S.mode === "edit") renderCards();
+  if (S.mode === "read" || S.mode === "edit" || S.mode === "pdf") renderCards();
+  if (S.mode === "pdf") paintPdf();
 }
 
 function viewEl() {
-  return S.mode === "edit" ? $("backdrop") : $("doc");
+  return S.mode === "edit" ? $("backdrop") : S.mode === "pdf" ? $("pdfPages") : $("doc");
 }
 
 // ---------- reading view ----------
@@ -593,6 +599,8 @@ function restoreView() {
   if (ta && v.draft?.text) (ta.value = v.draft.text), ta.dispatchEvent(new Event("input"));
   // The scroller scrolls smoothly; a restore must jump.
   const scroll = () => sc.scrollTo({ top: v.scroll || 0, behavior: "instant" });
+  // The PDF renders later; it applies this once its pages exist.
+  if (S.mode === "pdf") S.pdfScroll = v.scroll || 0;
   const s = v.sel;
   const select = () => {
     if (!s || s.end > len || (s.end <= s.start && !s.focus)) return;
@@ -648,9 +656,9 @@ function hideChip() {
 chip.addEventListener("mousedown", (e) => e.preventDefault());
 chip.addEventListener("click", () => {
   if (!S.chip) return;
-  const { start, end } = S.chip;
+  const { start, end, pdf } = S.chip;
   hideChip();
-  startDraft(start, end);
+  startDraft(start, end, pdf);
 });
 
 function readSelection() {
@@ -669,6 +677,7 @@ document.addEventListener("mousedown", (e) => {
 });
 
 document.addEventListener("mouseup", (e) => {
+  if (S.file && S.mode === "pdf") return void pdfMouseUp(e);
   if (!S.file || (S.mode !== "read" && S.mode !== "edit")) return;
   if (e.target.closest(".card, .add-chip, .modal, .top, .sidebar, .autocomplete")) return;
   setTimeout(() => {
@@ -709,11 +718,11 @@ function pointAt(x, y) {
   return Number(y > br.top + br.height / 2 ? best.dataset.e : best.dataset.s);
 }
 
-async function startDraft(start, end) {
+async function startDraft(start, end, pdf = null) {
   if (!S.file) return;
   if (S.mode === "edit" && S.dirty) await save();
   window.getSelection()?.removeAllRanges?.();
-  S.draft = { start, end };
+  S.draft = { start, end, pdf };
   S.active = "draft";
   renderView();
   requestAnimationFrame(() => document.querySelector('.card.draft textarea')?.focus());
@@ -731,7 +740,7 @@ async function submitDraft(text) {
   const anchor = makeAnchor(S.text, S.draft.start, S.draft.end);
   try {
     if (S.dirty) await save();
-    const t = await api("POST", "/api/threads", { file: S.file, anchor, text });
+    const t = await api("POST", "/api/threads", { file: S.file, anchor, text, pdf: S.draft.pdf || undefined });
     S.threads.push(t);
     S.live.set(t.id, { start: S.draft.start, end: S.draft.end });
     S.draft = null;
@@ -1427,8 +1436,17 @@ async function compilePdf() {
   try {
     const r = await api("POST", "/api/latex", { path: S.file });
     if (r.ok) {
+      const sc = $("scroller");
+      const top = S.pdfScroll ?? sc.scrollTop;
+      S.pdfScroll = null;
+      const pages = $("pdfPages");
+      await renderPdf(pages, r.pdf, pages.clientWidth);
       status.replaceChildren();
-      $("pdf").src = r.pdf + "#view=FitH";
+      S.pdfBoxes = new Map();
+      S.pdfHash = S.hash;
+      sc.scrollTo({ top, behavior: "instant" });
+      renderCards();
+      paintPdf();
     } else {
       const line = r.error?.line;
       status.replaceChildren(h("div", { class: "pdf-error" },
@@ -1437,6 +1455,92 @@ async function compilePdf() {
     }
   } catch (err) {
     status.replaceChildren(h("div", { class: "pdf-error" }, h("b", {}, "Error"), err.message));
+  }
+}
+
+// ---------- comments on the PDF ----------
+// Highlights come from SyncTeX (source line -> boxes on the page). A comment made on the PDF
+// also stores the exact rectangles that were selected; those win while the source is unchanged.
+
+let pdfPaint = 0;
+async function paintPdf() {
+  const root = $("pdfPages");
+  if (!root.querySelector(".pdf-page")) return;
+  const run = ++pdfPaint;
+  const items = rangesForRender().map((r) => {
+    const t = S.threads.find((x) => x.id === r.id);
+    const pdf = r.id === "draft" ? S.draft?.pdf : t?.pdf;
+    const exact = pdf?.rects?.length && pdf.textHash === S.hash && S.pdfHash === S.hash ? pdf.rects : null;
+    const la = lineOf(S.text, r.start);
+    const lb = r.end > r.start ? lineOf(S.text, r.end - 1) : la;
+    return { ...r, exact, la, lb: Math.min(lb, la + 80) };
+  });
+  const need = new Set();
+  for (const it of items) if (!it.exact) for (let l = it.la; l <= it.lb; l++) if (!S.pdfBoxes?.has(l)) need.add(l);
+  if (need.size && S.synctex) {
+    try {
+      const { boxes } = await api("POST", "/api/synctex", { op: "view", path: S.file, lines: [...need] });
+      for (const l of need) S.pdfBoxes.set(l, boxes[l] || []);
+    } catch {}
+  }
+  if (run !== pdfPaint || S.mode !== "pdf") return;
+  paintMarks(root, items.map((it) => {
+    let rects = it.exact;
+    if (!rects) {
+      rects = [];
+      for (let l = it.la; l <= it.lb; l++) rects.push(...(S.pdfBoxes?.get(l) || []));
+    }
+    return { id: it.id, kind: it.kind, rects, pin: it.start === it.end };
+  }));
+  markActive();
+  layoutCards();
+}
+
+async function pdfLine(page, x, y) {
+  const { hit } = await api("POST", "/api/synctex", { op: "edit", path: S.file, page, x, y });
+  if (!hit || (hit.file && !hit.file.endsWith("/" + S.file.split("/").pop()))) return null;
+  return hit.line;
+}
+
+async function pdfMouseUp(e) {
+  if (e.target.closest(".card, .add-chip, .modal, .top, .sidebar, .autocomplete")) return;
+  const root = $("pdfPages");
+  const sel = window.getSelection();
+  const moved = mouseDownAt && Math.hypot(e.clientX - mouseDownAt.x, e.clientY - mouseDownAt.y) > 4;
+  try {
+    if (sel.rangeCount && !sel.isCollapsed && root.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0);
+      const quote = sel.toString().replace(/\s+/g, " ").trim();
+      const rects = rangeRects(root, range);
+      if (!quote || !rects.length) return hideChip();
+      const top = range.getBoundingClientRect().top;
+      const a = rects[0];
+      const b = rects[rects.length - 1];
+      const [la, lb] = await Promise.all([pdfLine(a.page, a.x + 1, a.y + a.h / 2), pdfLine(b.page, b.x + b.w - 1, b.y + b.h / 2)]);
+      if (!la) return toast("Couldn't find that text in the source. Comment on it in Source instead.");
+      const m = matchInSource(S.text, quote, la, lb ?? la);
+      return showChip({ start: m.start, end: m.end, pdf: { quote, rects, textHash: S.hash } }, top);
+    }
+    if (moved || !e.target.closest(".pdf-page")) return hideChip();
+    const hits = marksAt(root, e.clientX, e.clientY);
+    if (hits.length) {
+      hideChip();
+      return setActive(hits[(hits.indexOf(S.active) + 1) % hits.length]);
+    }
+    const pageEl = pageAt(root, e.clientX, e.clientY);
+    const p = toPdf(pageEl, e.clientX, e.clientY);
+    const line = await pdfLine(p.page, p.x, p.y);
+    if (!line) return hideChip();
+    const c = caretAt(e.clientX, e.clientY);
+    const t = c?.node?.nodeType === Node.TEXT_NODE ? c.node.textContent : "";
+    const word = (t.slice(0, c?.offset ?? 0).match(/[\p{L}\p{N}]+$/u)?.[0] || "") + (t.slice(c?.offset ?? 0).match(/^[\p{L}\p{N}]+/u)?.[0] || "");
+    const pos = pointInSource(S.text, word, line);
+    const span = e.target.closest(".textLayer span");
+    const r = span ? span.getBoundingClientRect() : null;
+    const at = r ? toPdf(pageEl, e.clientX, r.top) : { ...p, y: p.y - 6 };
+    showChip({ start: pos, end: pos, pdf: { quote: "", rects: [{ page: p.page, x: at.x, y: at.y, w: 1, h: r ? r.height / Number(pageEl.dataset.scale) : 12 }], textHash: S.hash } }, e.clientY - 12);
+  } catch (err) {
+    toast(err.message);
   }
 }
 

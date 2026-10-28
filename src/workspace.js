@@ -301,7 +301,7 @@ export class Workspace {
     return t;
   }
 
-  addThread({ file, anchor, text, author = "user", kind = "comment" }) {
+  addThread({ file, anchor, text, author = "user", kind = "comment", pdf }) {
     this.resolve(file);
     if (!text?.trim()) throw new Error("comment text required");
     const t = {
@@ -313,6 +313,15 @@ export class Workspace {
       createdAt: now(),
       messages: [],
     };
+    // Made on the rendered PDF: what the user actually selected there, and where, so the highlight
+    // stays exact until the source changes.
+    if (pdf && Array.isArray(pdf.rects)) {
+      t.pdf = {
+        quote: String(pdf.quote ?? "").slice(0, 2000),
+        textHash: String(pdf.textHash ?? ""),
+        rects: pdf.rects.slice(0, 200).map((r) => ({ page: Number(r.page) | 0, x: +r.x || 0, y: +r.y || 0, w: +r.w || 0, h: +r.h || 0 })),
+      };
+    }
     this.known(file);
     this.state.threads.push(t);
     this.addMessage(t.id, { author, kind, text });
@@ -451,6 +460,8 @@ export class Workspace {
       status: t.status,
       target: t.anchor.quote ? "selection" : "point",
     };
+    // The rendered text the user selected in the PDF; the source range above is the best match for it.
+    if (t.pdf?.quote) out.pdf_quote = t.pdf.quote;
     if (r) {
       out.line = lineOf(text, r.start);
       if (t.anchor.quote) out.quote = text.slice(r.start, r.end);

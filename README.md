@@ -27,7 +27,10 @@ ln -s /Users/michaeleight/Coding/MCP/mcp-doc-review/.claude/skills/doc-review ~/
 ```
 
 LaTeX preview needs `latexmk` or `pdflatex` (MacTeX / BasicTeX: `brew install --cask basictex`,
-~100 MB). Without one, the PDF tab is hidden.
+~100 MB). Without one, the PDF tab is hidden. Comments on the PDF also need `synctex` (it ships with
+TeX Live and BasicTeX): it maps a spot in the PDF to its source line, and the selected words are
+then matched in that line, so a comment on rendered math lands on the LaTeX that produced it.
+The PDF is drawn with PDF.js from jsDelivr.
 
 UI only, no agent (comments queue until an agent calls `review_wait` on the same folder):
 
@@ -50,7 +53,7 @@ node src/server.js --serve ~/path/to/folder
 | Send | **Send to AI** (⌘⇧↵) |
 | Formatting | ⌘B bold, ⌘I italic, ⌘U underline, ⌘⇧X strikethrough, ⌘E code, ⌘K link, ⌘⌥1–3 headings, ⌘⇧8 / ⌘⇧7 lists, Tab / ⇧Tab indent. These work in Edit, and on a selection in Read. Markdown and LaTeX markup as appropriate. |
 | Review AI edits | **Changes** tab: hover a change for Accept / Revert, or Accept all / Revert all |
-| LaTeX | **Source** to edit and comment, **PDF** to compile and preview |
+| LaTeX | **Source** to edit and comment; **PDF** to compile, preview and comment right on the rendered page (select text or click a spot) |
 
 ### Commands
 

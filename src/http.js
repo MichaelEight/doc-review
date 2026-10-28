@@ -8,7 +8,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { compileLatex, latexAvailable } from "./latex.js";
+import { compileLatex, latexAvailable, synctexAvailable, synctexEdit, synctexView } from "./latex.js";
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web");
 const MIME = {
@@ -95,7 +95,7 @@ export class ReviewHttp {
     if (route === "GET /api/state") {
       return send(res, 200, {
         id: ws.id, root: ws.root, name: ws.name, files: ws.listFiles(), threads: ws.state.threads, tags: ws.state.tags,
-        baselines: Object.keys(ws.baselines), latex: latexAvailable(), ...ws.status(),
+        baselines: Object.keys(ws.baselines), latex: latexAvailable(), synctex: synctexAvailable(), ...ws.status(),
       });
     }
     if (route === "GET /api/events") return this.events(ws, req, res);
@@ -107,7 +107,7 @@ export class ReviewHttp {
       return fs.createReadStream(abs).pipe(res);
     }
     if (route === "POST /api/baseline") return send(res, 200, (ws.setBaseline(body.path, body.text ?? null), { ok: true }));
-    if (route === "POST /api/threads") return send(res, 200, ws.addThread({ file: body.file, anchor: body.anchor, text: body.text }));
+    if (route === "POST /api/threads") return send(res, 200, ws.addThread({ file: body.file, anchor: body.anchor, text: body.text, pdf: body.pdf }));
     if (tm && !tm[2] && tm[0].endsWith("/messages") && req.method === "POST") return send(res, 200, ws.addMessage(tm[1], { author: "user", text: body.text }));
     if (tm && tm[2] && req.method === "PATCH") return send(res, 200, (ws.editMessage(tm[1], tm[2], String(body.text ?? "")), { ok: true }));
     if (tm && tm[2] && req.method === "DELETE") return send(res, 200, (ws.deleteMessage(tm[1], tm[2]), { ok: true }));
@@ -117,6 +117,17 @@ export class ReviewHttp {
     if (route === "POST /api/latex") {
       const out = await compileLatex(ws, body.path);
       return send(res, 200, { ...out, pdf: out.pdf ? `/api/pdf?ws=${ws.id}&t=${this.token}&path=${encodeURIComponent(body.path)}&v=${Date.now()}` : null });
+    }
+    if (route === "POST /api/synctex") {
+      ws.resolve(body.path);
+      const num = (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n)) throw Object.assign(new Error("bad coordinate"), { status: 400 });
+        return n;
+      };
+      if (body.op === "edit") return send(res, 200, { hit: await synctexEdit(ws, body.path, Math.round(num(body.page)), num(body.x), num(body.y)) });
+      const lines = [...new Set((body.lines || []).map((l) => Math.round(num(l))))].filter((l) => l > 0).slice(0, 400);
+      return send(res, 200, { boxes: await synctexView(ws, body.path, lines) });
     }
     if (route === "GET /api/pdf") {
       const rel = q("path");

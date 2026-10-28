@@ -53,6 +53,12 @@ The commands are `/fix`, `/simplify`, `/explain`, `/rewrite`, `/shorten`, `/expa
 `/graph` writes `figures/<name>.py` and `figures/<name>.png` next to the document with
 matplotlib, then inserts the image. Ask the user before installing matplotlib if it is missing.
 
+## Comments made on the PDF
+
+For `.tex` files the user can also comment on the rendered PDF. The anchor (`quote`, `line`) is
+the matching LaTeX source. `pdf_quote` is the text as it looked in the PDF; use it when the source
+match looks loose, for example on math.
+
 ## References inside comments
 
 - `@path/file`: a workspace file, resolved for you in `referenced_files`. Read it when the
