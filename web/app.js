@@ -254,6 +254,7 @@ function renderSidebar() {
 // ---------- files & modes ----------
 
 async function openFile(path) {
+  if (S.file) saveView();
   if (S.dirty) await save();
   closeModal(true);
   hideChip();
@@ -273,7 +274,7 @@ async function openFile(path) {
   const preferred = store.get("mode:" + S.kind, modes[0]);
   setMode(modes.includes(preferred) && preferred !== "changes" ? preferred : modes[0], true);
   renderSidebar();
-  $("scroller").scrollTop = 0;
+  restoreView();
 }
 
 async function reloadFile() {
@@ -341,8 +342,12 @@ function renderDoc() {
   const tree = S.kind === "md" ? parseMarkdown(S.text) : parsePlain(S.text);
   const dom = renderTree(tree, rangesForRender(), rawUrl);
   const doc = $("doc");
+  // Re-rendering replaces the text nodes; carry a live selection over to the new ones.
+  const sel = window.getSelection();
+  const keep = sel.rangeCount && !sel.isCollapsed && doc.contains(sel.anchorNode) ? selectionToSource(doc) : null;
   doc.classList.toggle("plain", S.kind !== "md");
   doc.replaceChildren(...dom.childNodes);
+  if (keep) selectSource(keep.start, keep.end);
   for (const img of doc.querySelectorAll("img")) img.addEventListener("load", () => layoutCards(), { once: true });
   markActive();
 }
@@ -521,6 +526,92 @@ function setSaveState(text) {
   clearTimeout(saveFade);
   if (text === "Saved") saveFade = setTimeout(() => (el.style.opacity = 0), 1600);
 }
+
+// ---------- view state across reloads ----------
+// A reload (or coming back to a file in the same tab) puts you back where you were: scroll,
+// selection, active comment, open popup, unsent comment drafts. Kept in sessionStorage, so it is
+// per tab and per file, and a fresh tab starts clean.
+
+const viewKey = () => `docreview:view:${WS}:${S.file}`;
+
+function saveView() {
+  if (!S.file) return;
+  const sel = S.mode === "edit"
+    ? { start: src.selectionStart, end: src.selectionEnd, focus: document.activeElement === src }
+    : S.mode === "read" ? selectionToSource($("doc")) : null;
+  const v = {
+    mode: S.mode,
+    scroll: $("scroller").scrollTop,
+    sel: sel && { start: sel.start, end: sel.end, focus: !!sel.focus },
+    active: S.active,
+    modal: modalId,
+    draft: S.draft && { ...S.draft, text: document.querySelector(".card.draft textarea")?.value || "" },
+    replies: [...S.replyDrafts].filter(([, t]) => t),
+    // Fallback for typing the keepalive save below could not deliver (body over 64 KB, server busy).
+    unsaved: S.dirty ? { text: S.text, hash: S.hash } : null,
+  };
+  try {
+    sessionStorage.setItem(viewKey(), JSON.stringify(v));
+  } catch {}
+}
+
+function restoreView() {
+  let v = null;
+  try {
+    v = JSON.parse(sessionStorage.getItem(viewKey()));
+  } catch {}
+  const sc = $("scroller");
+  if (!v) return void (sc.scrollTop = 0);
+  for (const [k, t] of v.replies || []) S.replyDrafts.set(k, t);
+  if (v.unsaved && v.unsaved.hash === S.hash && v.unsaved.text !== S.text && !editLocked()) {
+    S.text = v.unsaved.text;
+    S.dirty = true;
+    resolveAll();
+    save();
+  }
+  if (v.mode && v.mode !== S.mode && modesFor().includes(v.mode)) setMode(v.mode, true);
+  const len = S.text.length;
+  if (v.draft && v.draft.end <= len) {
+    S.draft = { start: v.draft.start, end: v.draft.end };
+    S.active = "draft";
+  } else if (v.active && S.threads.some((t) => t.id === v.active)) S.active = v.active;
+  renderView();
+  const ta = document.querySelector(".card.draft textarea");
+  if (ta && v.draft?.text) (ta.value = v.draft.text), ta.dispatchEvent(new Event("input"));
+  // The scroller scrolls smoothly; a restore must jump.
+  const scroll = () => sc.scrollTo({ top: v.scroll || 0, behavior: "instant" });
+  const s = v.sel;
+  const select = () => {
+    if (!s || s.end > len || (s.end <= s.start && !s.focus)) return;
+    if (S.mode === "edit") {
+      src.focus({ preventScroll: true });
+      src.setSelectionRange(s.start, s.end);
+    } else if (S.mode === "read" && s.end > s.start) {
+      const r = selectSource(s.start, s.end);
+      if (r) showChip({ start: s.start, end: s.end }, r.getBoundingClientRect().top);
+    }
+  };
+  scroll();
+  select();
+  // Math renders once KaTeX arrives, which rebuilds the page and changes heights; restore again after.
+  if (!window.katex) window.addEventListener("load", () => requestAnimationFrame(() => (scroll(), select())), { once: true });
+  if (ta && !v.modal) ta.focus({ preventScroll: true });
+  if (v.modal && S.threads.some((t) => t.id === v.modal)) openModal(v.modal);
+}
+
+// Leaving or reloading: store the view and push unsaved typing to disk. keepalive lets the request
+// finish after the page is gone.
+window.addEventListener("pagehide", () => {
+  saveView();
+  if (S.dirty && S.file) {
+    fetch(`/api/file?ws=${WS}`, {
+      method: "PUT",
+      keepalive: true,
+      headers: { "content-type": "application/json", "x-token": TOKEN },
+      body: JSON.stringify({ path: S.file, text: S.text, baseHash: S.hash }),
+    }).catch(() => {});
+  }
+});
 
 // ---------- selection, chip, drafts ----------
 
@@ -1376,7 +1467,7 @@ function wire() {
   });
 }
 
-// Select a source range in the reading view (after a formatting shortcut).
+// Select a source range in the reading view (after a formatting shortcut, a re-render or a reload).
 function selectSource(a, b) {
   const doc = $("doc");
   const segs = [...doc.querySelectorAll(".seg")];
@@ -1390,13 +1481,14 @@ function selectSource(a, b) {
   };
   const p = find(a, false);
   const q = find(b, true);
-  if (!p || !q) return;
+  if (!p || !q) return null;
   const r = document.createRange();
   r.setStart(p.node, p.off);
   r.setEnd(q.node, q.off);
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(r);
+  return r;
 }
 
 boot();
