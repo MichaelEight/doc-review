@@ -15,6 +15,9 @@ diff and accept or revert each one.
 - **Data**: `<workspace>/.doc-review/comments.json` (threads, rounds, tags) and
   `baselines.json` (what the diff compares against). Add `.doc-review/` to the workspace's
   `.gitignore` unless you want to keep the review history.
+- **Token**: the UI link carries a secret kept in `~/.config/doc-review/token` (mode 600;
+  override with `DOC_REVIEW_TOKEN_FILE`). It survives restarts, so open tabs keep working; delete
+  the file to revoke old links.
 
 ## Setup
 

@@ -1,10 +1,12 @@
 // Local HTTP server for the review UI: static files, a small JSON API and a server-sent event
-// stream per workspace. Binds 127.0.0.1 only; every API call carries a per-process token so other
-// web pages open in the browser cannot drive it.
+// stream per workspace. Binds 127.0.0.1 only; every API call carries a token so other web pages
+// open in the browser cannot drive it. The token is kept in the user's config dir, so a restarted
+// server accepts the tabs that are already open.
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { compileLatex, latexAvailable } from "./latex.js";
 
@@ -15,10 +17,26 @@ const MIME = {
   ".webp": "image/webp", ".pdf": "application/pdf", ".json": "application/json", ".txt": "text/plain; charset=utf-8",
 };
 
+// DOC_REVIEW_TOKEN_FILE overrides the location (tests, several users on one machine).
+const TOKEN_FILE = process.env.DOC_REVIEW_TOKEN_FILE || path.join(os.homedir(), ".config", "doc-review", "token");
+
+function loadToken() {
+  try {
+    const t = fs.readFileSync(TOKEN_FILE, "utf8").trim();
+    if (/^[0-9a-f]{32}$/.test(t)) return t;
+  } catch {}
+  const t = crypto.randomBytes(16).toString("hex");
+  try {
+    fs.mkdirSync(path.dirname(TOKEN_FILE), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(TOKEN_FILE, t + "\n", { mode: 0o600 });
+  } catch {}
+  return t;
+}
+
 export class ReviewHttp {
   constructor(registry) {
     this.registry = registry;
-    this.token = crypto.randomBytes(16).toString("hex");
+    this.token = loadToken();
     this.server = null;
     this.port = null;
   }
