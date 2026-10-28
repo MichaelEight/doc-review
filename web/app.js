@@ -1428,19 +1428,24 @@ function schedulePdf() {
   pdfTimer = setTimeout(compilePdf, 1200);
 }
 
+let pdfCompile = 0;
 async function compilePdf() {
   if (S.mode !== "pdf" || !S.file) return;
+  const run = ++pdfCompile;
   if (S.dirty) await save();
   const status = $("pdfStatus");
   status.replaceChildren(h("span", { class: "agent-pill working" }, h("i"), h("span", {}, "Compiling…")));
   try {
     const r = await api("POST", "/api/latex", { path: S.file });
+    if (run !== pdfCompile) return;
     if (r.ok) {
       const sc = $("scroller");
       const top = S.pdfScroll ?? sc.scrollTop;
       S.pdfScroll = null;
       const pages = $("pdfPages");
-      await renderPdf(pages, r.pdf, pages.clientWidth);
+      const built = await renderPdf(r.pdf, pages.clientWidth);
+      if (run !== pdfCompile || S.mode !== "pdf") return;
+      pages.replaceChildren(...built);
       status.replaceChildren();
       S.pdfBoxes = new Map();
       S.pdfHash = S.hash;
@@ -1475,8 +1480,11 @@ async function paintPdf() {
     const lb = r.end > r.start ? lineOf(S.text, r.end - 1) : la;
     return { ...r, exact, la, lb: Math.min(lb, la + 80) };
   });
+  // Lines such as \] or \begin{center} produce nothing on the page; then the nearest line after
+  // (or before) that does stands in, so the card still sits next to the right spot.
+  const near = (it) => [...Array(6).keys()].slice(1).flatMap((d) => [it.lb + d, it.la - d]).filter((l) => l > 0);
   const need = new Set();
-  for (const it of items) if (!it.exact) for (let l = it.la; l <= it.lb; l++) if (!S.pdfBoxes?.has(l)) need.add(l);
+  for (const it of items) if (!it.exact) for (const l of [...Array(it.lb - it.la + 1).keys()].map((k) => it.la + k).concat(near(it))) if (!S.pdfBoxes?.has(l)) need.add(l);
   if (need.size && S.synctex) {
     try {
       const { boxes } = await api("POST", "/api/synctex", { op: "view", path: S.file, lines: [...need] });
@@ -1489,6 +1497,13 @@ async function paintPdf() {
     if (!rects) {
       rects = [];
       for (let l = it.la; l <= it.lb; l++) rects.push(...(S.pdfBoxes?.get(l) || []));
+      for (const l of rects.length ? [] : near(it)) {
+        const b = S.pdfBoxes?.get(l) || [];
+        if (b.length) {
+          rects = l < it.la ? b.slice(-1) : b.slice(0, 1);
+          break;
+        }
+      }
     }
     return { id: it.id, kind: it.kind, rects, pin: it.start === it.end };
   }));

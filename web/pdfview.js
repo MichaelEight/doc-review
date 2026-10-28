@@ -24,8 +24,9 @@ function loadLib() {
   return lib;
 }
 
-// Build all pages off-screen, then swap them in at once so a recompile does not flash.
-export async function renderPdf(container, url, width) {
+// Build all pages off-screen and return them; the caller swaps them in at once (so a recompile
+// does not flash, and a slower, older render can be dropped).
+export async function renderPdf(url, width) {
   const pdfjs = await loadLib();
   const doc = await pdfjs.getDocument({ url }).promise;
   const dpr = window.devicePixelRatio || 1;
@@ -59,8 +60,8 @@ export async function renderPdf(container, url, width) {
     el.append(canvas, marks, text);
     pages.push(el);
   }
-  container.replaceChildren(...pages);
   doc.destroy();
+  return pages;
 }
 
 document.addEventListener("mouseup", () => {

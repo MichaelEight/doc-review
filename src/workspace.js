@@ -60,9 +60,12 @@ export class Workspace {
     fs.mkdirSync(this.dir, { recursive: true });
     const gi = path.join(this.dir, ".gitignore");
     if (!fs.existsSync(gi)) fs.writeFileSync(gi, "build/\nbaselines.json\n");
+    // Baselines first: another process (the UI server next to an agent) reloads everything when
+    // comments.json changes, and must find the baselines of the same save already on disk.
+    this.ownBaselineWrite = JSON.stringify(this.baselines);
+    fs.writeFileSync(this.baselineFile, this.ownBaselineWrite);
     this.ownWrite = JSON.stringify(this.state, null, 1);
     fs.writeFileSync(this.file, this.ownWrite);
-    fs.writeFileSync(this.baselineFile, JSON.stringify(this.baselines));
   }
 
   watch() {
@@ -72,6 +75,7 @@ export class Workspace {
         if (!name) return;
         const rel = name.split(path.sep).join("/");
         if (rel === ".doc-review/comments.json") return this.onStateFileChange();
+        if (rel === ".doc-review/baselines.json") return this.onBaselineFileChange();
         if (rel.split("/").some((p) => SKIP_DIRS.has(p))) return;
         clearTimeout(pending.get(rel));
         pending.set(rel, setTimeout(() => {
@@ -86,6 +90,22 @@ export class Workspace {
   }
 
   // Another process (a second server on the same folder) wrote comments.json.
+  onBaselineFileChange() {
+    let text;
+    try {
+      text = fs.readFileSync(this.baselineFile, "utf8");
+    } catch {
+      return;
+    }
+    if (text === this.ownBaselineWrite) return;
+    try {
+      this.baselines = JSON.parse(text);
+    } catch {
+      return;
+    }
+    this.emit({ type: "threads" });
+  }
+
   onStateFileChange() {
     let text;
     try {
