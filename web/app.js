@@ -2,6 +2,7 @@ import { parseMarkdown, parsePlain } from "./markdown.js";
 import { renderTree, selectionToSource, pointToSource, caretAt, buildBackdrop } from "./view.js";
 import { rulesFor, ruleRanges, styleCss, matchesScope } from "./display.js";
 import { RECIPES, findRecipe, fillPrompt, scopeGlobs } from "./recipes.js";
+import { outlineOf, headingAt } from "./outline.js";
 import { makeAnchor, resolveAnchor, lineOf } from "./anchor.js";
 import { offsetMapper, mapRange } from "./remap.js";
 import { diffLines, diffWords, acceptHunk, revertHunk, splitLines } from "./diff.js";
@@ -386,6 +387,69 @@ function renderStylePanel() {
         h("span", { class: "rl" }, r.label)))) : null);
 }
 
+// ---------- outline ----------
+
+const outlineBox = $("outline");
+let outlineCache = { text: null, kind: null, list: [] };
+
+function outline() {
+  if (!S.file) return [];
+  if (outlineCache.text === S.text && outlineCache.kind === S.kind) return outlineCache.list;
+  outlineCache = { text: S.text, kind: S.kind, list: outlineOf(S.text, S.kind) };
+  return outlineCache.list;
+}
+
+function toggleOutline() {
+  if (outlineBox.classList.contains("on")) return closeOutline();
+  const list = outline();
+  if (!list.length) return toast(S.file ? "No headings in this file." : "Open a file first.");
+  const here = headingAt(list, viewOffset());
+  fill(outlineBox, list.map((hd) =>
+    h("button", {
+      class: "out-row" + (hd === here ? " on" : ""), "data-lvl": Math.min(hd.level, 6),
+      onclick: () => {
+        closeOutline();
+        scrollToOffset(hd.start);
+      },
+    }, h("span", { class: "out-dash" }), h("span", { class: "out-t" }, hd.title))));
+  outlineBox.classList.add("on");
+  const r = $("fileName").getBoundingClientRect();
+  outlineBox.style.left = Math.min(r.left, window.innerWidth - outlineBox.offsetWidth - 10) + "px";
+  outlineBox.style.top = r.bottom + 8 + "px";
+  outlineBox.querySelector(".out-row.on")?.scrollIntoView({ block: "center" });
+}
+
+function closeOutline() {
+  outlineBox.classList.remove("on");
+}
+
+// Where the reader is now, as a source offset: the topmost thing still on screen.
+function viewOffset() {
+  if (S.mode === "edit") return src.selectionStart || 0;
+  const sc = $("scroller");
+  const top = sc.getBoundingClientRect().top + 8;
+  for (const el of $("doc").querySelectorAll("[data-s]")) {
+    if (el.getBoundingClientRect().bottom >= top) return Number(el.dataset.s);
+  }
+  return 0;
+}
+
+// Put a source offset at the top of the view, without selecting anything: this is navigation.
+// The jump lands rather than glides: the scroller animates smoothly by default, which over a few
+// thousand pixels is slow, and an animation that something else interrupts leaves you nowhere.
+function scrollToOffset(pos) {
+  const sc = $("scroller");
+  if (S.mode === "pdf" || (S.mode === "changes" && modesFor().includes("edit"))) setMode(modesFor()[0]);
+  if (S.mode === "read") {
+    const el = [...$("doc").querySelectorAll("[data-s]")].find((e) => Number(e.dataset.s) >= pos);
+    if (el) return void sc.scrollBy({ top: el.getBoundingClientRect().top - sc.getBoundingClientRect().top - 20, behavior: "instant" });
+  }
+  if (S.mode !== "edit") return;
+  src.focus();
+  src.setSelectionRange(pos, pos);
+  sc.scrollBy({ top: backdropRect(pos).top - sc.getBoundingClientRect().top - 20, behavior: "instant" });
+}
+
 // ---------- display recipes ----------
 //
 // A recipe is the wording for a display rule plus the files it should cover. The user picks one,
@@ -725,22 +789,36 @@ function updateLock() {
 }
 
 // Caret rectangle for a source offset, measured on the backdrop (same layout as the textarea).
+// Where an offset sits on screen in the source overlay. A collapsed range often has no client
+// rect at all, and the old fallback then handed back the whole backdrop, which reads as "the top
+// of the file" and sends every jump there. One real character always has a rect, so measure that.
 function backdropRect(offset) {
   const bd = $("backdrop");
   const walker = document.createTreeWalker(bd, NodeFilter.SHOW_TEXT);
   let n;
   let pos = 0;
+  let last = null;
   while ((n = walker.nextNode())) {
     const len = n.nodeValue.length;
-    if (pos + len >= offset) {
+    if (!len) continue;
+    if (pos + len > offset) {
+      const at = Math.max(0, offset - pos);
       const r = document.createRange();
-      r.setStart(n, Math.max(0, offset - pos));
-      r.collapse(true);
+      r.setStart(n, at);
+      r.setEnd(n, at + 1);
       const rect = r.getClientRects()[0] || r.getBoundingClientRect();
-      if (rect.top || rect.height) return rect;
-      break;
+      if (rect.height) return rect;
     }
+    last = n;
     pos += len;
+  }
+  // Past the end of the text: the last character is as close as we get.
+  if (last) {
+    const r = document.createRange();
+    r.setStart(last, last.nodeValue.length - 1);
+    r.setEnd(last, last.nodeValue.length);
+    const rect = r.getClientRects()[0] || r.getBoundingClientRect();
+    if (rect.height) return rect;
   }
   return bd.getBoundingClientRect();
 }
@@ -2056,7 +2134,7 @@ function revealOffset(start, end) {
   const sc = $("scroller");
   if (S.mode === "read") {
     const r = selectSource(a, b);
-    if (r) return void sc.scrollBy({ top: r.getBoundingClientRect().top - sc.getBoundingClientRect().top - 160 });
+    if (r) return void sc.scrollBy({ top: r.getBoundingClientRect().top - sc.getBoundingClientRect().top - 160, behavior: "instant" });
   }
   if (S.mode !== "edit") {
     if (!modesFor().includes("edit")) return;
@@ -2065,7 +2143,7 @@ function revealOffset(start, end) {
   src.focus();
   src.setSelectionRange(a, b);
   const r = backdropRect(a);
-  sc.scrollBy({ top: r.top - sc.getBoundingClientRect().top - 180 });
+  sc.scrollBy({ top: r.top - sc.getBoundingClientRect().top - 180, behavior: "instant" });
 }
 
 // ---------- wiring ----------
@@ -2088,6 +2166,7 @@ function wire() {
       } catch {}
     }, 150);
   }, { passive: true });
+  $("fileName").addEventListener("click", toggleOutline);
   $("openRecipes").addEventListener("click", openRecipes);
   $("recBackdrop").addEventListener("click", () => closeRecipes());
   $("collapseAll").addEventListener("click", () => setCollapsed(allDirs()));
@@ -2111,7 +2190,10 @@ function wire() {
     else hideNoteTip();
   });
   $("doc").addEventListener("mouseleave", hideNoteTip);
-  $("scroller").addEventListener("scroll", () => (hideChip(), hideNoteTip()), { passive: true });
+  $("scroller").addEventListener("scroll", () => (hideChip(), hideNoteTip(), closeOutline()), { passive: true });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#outline, #fileName")) closeOutline();
+  });
   new ResizeObserver(() => layoutCards()).observe($("docCol"));
 
   document.addEventListener("keydown", (e) => {
@@ -2120,8 +2202,13 @@ function wire() {
       e.preventDefault();
       return openPalette();
     }
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "o") {
+      e.preventDefault();
+      return toggleOutline();
+    }
     if (e.key === "Escape") {
       if (palette.classList.contains("on")) return closePalette();
+      if (outlineBox.classList.contains("on")) return closeOutline();
       if (rec) return closeRecipes();
       if (modal.classList.contains("on")) return closeModal();
       if (S.draft) return cancelDraft();

@@ -17,7 +17,7 @@
     <div class="crumbs">
       <span class="ws-name" id="wsName"></span>
       <span class="crumb-sep">/</span>
-      <span class="file-name" id="fileName">—</span>
+      <button class="file-name" id="fileName" title="Jump to a heading (⌘⇧O)">—</button>
       <span class="save-state" id="saveState"></span>
     </div>
     <div class="modes" id="modes" role="tablist"></div>
@@ -91,6 +91,8 @@
     <div class="palette-list" id="paletteList"></div>
     <div class="palette-foot"><span>↑ ↓ to move · ↵ to open</span><span id="paletteHint"></span></div>
   </div>
+
+  <div class="outline" id="outline"></div>
 
   <div class="rec-backdrop" id="recBackdrop"></div>
   <div class="rec" id="rec" role="dialog" aria-modal="true" aria-label="Display recipes"></div>

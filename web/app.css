@@ -102,7 +102,65 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .crumbs { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; }
 .ws-name { color: var(--muted); font-weight: 500; white-space: nowrap; }
 .crumb-sep { color: var(--line-2); }
-.file-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-name {
+  font: 600 15px var(--ui);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 0;
+  background: transparent;
+  padding: 3px 7px;
+  margin: -3px -7px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.file-name:hover { background: var(--hover); }
+
+/* ---------- outline ---------- */
+
+.outline {
+  position: fixed;
+  z-index: 58;
+  min-width: 240px;
+  max-width: 420px;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  padding: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+  display: none;
+}
+.outline.on { display: block; animation: card-in 0.14s var(--ease) both; }
+.out-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 6px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--ink-2);
+  font: 13.5px var(--ui);
+}
+.out-row:hover { background: var(--hover); color: var(--ink); }
+.out-row.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.out-dash { width: 14px; height: 2px; border-radius: 2px; background: currentColor; opacity: 0.35; flex: none; }
+.out-row.on .out-dash { opacity: 1; }
+.out-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.out-row[data-lvl="1"] { font-weight: 600; color: var(--ink); }
+.out-row[data-lvl="2"] { padding-left: 22px; }
+.out-row[data-lvl="3"] { padding-left: 38px; }
+.out-row[data-lvl="4"] { padding-left: 54px; }
+.out-row[data-lvl="5"] { padding-left: 70px; }
+.out-row[data-lvl="6"] { padding-left: 86px; }
+.out-row[data-lvl="1"] .out-dash { width: 18px; height: 3px; }
 .save-state { color: var(--muted); font-size: 12.5px; white-space: nowrap; transition: opacity 0.4s; }
 
 .modes {

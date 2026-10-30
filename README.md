@@ -45,6 +45,7 @@ node src/server.js --serve ~/path/to/folder
 | Action | How |
 |---|---|
 | Quick search | ⌘K / Ctrl-K: type to jump to a file by path, or to find a phrase anywhere in the folder. ↑ ↓ to move, ↵ to open, Esc to close. Opening a text hit jumps to that spot and selects it. |
+| Jump to a heading | Click the file name in the header, or ⌘⇧O: the document's own structure, indented by level, with the section you are in marked. Click one to jump there. Markdown reads `#` and underlined headings, LaTeX its sectioning commands, plain text only unmistakable markers (an underline, a leading `#`, a line that says "Chapter 3"), so a chat log correctly offers nothing. |
 | Display recipes | ☆ above the file list: ready-made colouring and notes. Pick one, tick the files or folders, send (see below). |
 | Browse files | The sidebar groups files by folder. Click a folder header to fold it; the header shows how many files it holds, plus open comments and a dot for pending AI changes while it is folded. The ⌃⌄ buttons above the list fold or unfold everything, and the state is remembered per folder. |
 | Comment on text | Select it, click **Comment** in the margin (or ⌘⌥M) |
