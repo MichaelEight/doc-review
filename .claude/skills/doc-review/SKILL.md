@@ -129,6 +129,24 @@ review_style(rules: [{
 Keep notes short: they sit in the middle of the text. A whole sentence belongs in a comment
 thread, not in an annotation.
 
+### Recipes
+
+The user can pick a ready-made rule from the UI instead of typing one. It arrives as an ordinary
+`/style` comment, with a line like:
+
+```
+Apply it to this scope and nothing else: scope ["logs/*", "notes.txt"].
+```
+
+That line is the user picking files and folders by hand, so pass those globs to `review_style`
+unchanged. Do not widen them, do not narrow them to the file the comment sits on, and do not
+make one rule per file when one glob covers them. The comment is anchored in whichever file they
+happened to have open, which says nothing about what the rule should cover.
+
+A recipe can be vague ("colour the speakers", "explain each command on hover") because you fill
+in the detail: read a file in scope first, work out the real pattern from what is in it, and say
+in your reply what you matched.
+
 ## Comments made on the PDF
 
 For `.tex` files the user can also comment on the rendered PDF. The anchor (`quote`, `line`) is

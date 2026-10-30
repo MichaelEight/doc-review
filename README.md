@@ -45,6 +45,7 @@ node src/server.js --serve ~/path/to/folder
 | Action | How |
 |---|---|
 | Quick search | ⌘K / Ctrl-K: type to jump to a file by path, or to find a phrase anywhere in the folder. ↑ ↓ to move, ↵ to open, Esc to close. Opening a text hit jumps to that spot and selects it. |
+| Display recipes | ☆ above the file list: ready-made colouring and notes. Pick one, tick the files or folders, send (see below). |
 | Browse files | The sidebar groups files by folder. Click a folder header to fold it; the header shows how many files it holds, plus open comments and a dot for pending AI changes while it is folded. The ⌃⌄ buttons above the list fold or unfold everything, and the state is remembered per folder. |
 | Comment on text | Select it, click **Comment** in the margin (or ⌘⌥M) |
 | Comment at a spot | Click anywhere in the page, then **+** |
@@ -113,6 +114,33 @@ Rules show up in a **Display rules** panel at the bottom of the sidebar, listing
 apply to the open file with a preview of each. The checkbox switches a rule off without deleting
 it, so you can ask for a colouring, try it, and turn it off again. They apply in both Read and
 Source, and overlapping rules stack with the later one winning.
+
+### Recipes
+
+The ☆ button above the file list opens **Display recipes**: the half-dozen rules people ask for
+most, already written out. Pick one, fill in the blanks, tick the files or whole folders it
+should cover, edit the wording if you want, and it goes in as an ordinary `/style` comment that
+the next round picks up. **Add and send** delivers it straight away.
+
+Folders are ticked as a whole, so a folder whose files are all picked becomes one glob: forty
+paths turn into `logs/*`, and the rule keeps working when the folder grows.
+
+Adding a recipe is data, not code. An entry in `RECIPES` in `web/recipes.js`:
+
+```js
+{
+  id: "time-gap",
+  name: "Time since the previous line",
+  blurb: "Writes +0h 0m 16s after every timestamp",
+  fields: [{ name: "what", label: "What to fade", placeholder: "the timestamps" }],
+  prompt: "Add a display rule that dims {{what}}.",
+}
+```
+
+`{{field}}` is replaced by what the user typed, or by that field's `default`, or by its
+`placeholder`. Single braces are left alone, so `{delta}` reaches the AI untouched. The scope
+line is appended for you, so a prompt should never say which files to change. A test walks every
+recipe and fails if a field is unused, a placeholder survives, or a prompt writes its own scope.
 
 They live in `.doc-review/comments.json` alongside the comment threads, so they persist and are
 shared between the UI and the agent. They are per workspace, not per user.

@@ -1,6 +1,7 @@
 import { parseMarkdown, parsePlain } from "./markdown.js";
 import { renderTree, selectionToSource, pointToSource, caretAt, buildBackdrop } from "./view.js";
 import { rulesFor, ruleRanges, styleCss, matchesScope } from "./display.js";
+import { RECIPES, findRecipe, fillPrompt, scopeGlobs } from "./recipes.js";
 import { makeAnchor, resolveAnchor, lineOf } from "./anchor.js";
 import { offsetMapper, mapRange } from "./remap.js";
 import { diffLines, diffWords, acceptHunk, revertHunk, splitLines } from "./diff.js";
@@ -383,6 +384,171 @@ function renderStylePanel() {
         h("input", { type: "checkbox", checked: r.enabled !== false, onchange: (e) => toggleStyleRule(r, e.target.checked) }),
         h("span", { class: "sw", style: styleCss(r.style) || null }, "Aa"),
         h("span", { class: "rl" }, r.label)))) : null);
+}
+
+// ---------- display recipes ----------
+//
+// A recipe is the wording for a display rule plus the files it should cover. The user picks one,
+// tweaks the words, ticks files or whole folders, and it goes in as an ordinary /style comment,
+// so the AI handles it in the next round like anything else they wrote by hand.
+
+const recBox = $("rec");
+let rec = null;
+
+function openRecipes() {
+  if (!S.files.some((f) => f.editable)) return toast("No files to apply a rule to.");
+  rec = { id: RECIPES[0].id, values: {}, text: null, picked: new Set(S.file ? [S.file] : []), open: new Set([dirOf(S.file || "")]) };
+  renderRec();
+  recBox.classList.add("on");
+  $("recBackdrop").classList.add("on");
+}
+
+function closeRecipes() {
+  rec = null;
+  recBox.classList.remove("on");
+  $("recBackdrop").classList.remove("on");
+}
+
+const recFiles = () => S.files.filter((f) => f.editable);
+const recPrompt = () => (rec.text ?? fillPrompt(findRecipe(rec.id), rec.values, scopeGlobs(rec.picked, recFiles())));
+
+// Only the preview changes while the user types, so the caret stays where they put it.
+function syncRecPrompt() {
+  const ta = recBox.querySelector(".rec-prompt");
+  if (ta && rec.text == null) ta.value = recPrompt();
+  const sum = recBox.querySelector(".rec-sum");
+  if (sum) sum.textContent = scopeSummary();
+  const add = recBox.querySelector(".rec-add");
+  if (add) add.disabled = !rec.picked.size || !S.file;
+}
+
+function scopeSummary() {
+  const n = rec.picked.size;
+  if (!n) return "No files picked";
+  const globs = scopeGlobs(rec.picked, recFiles());
+  if (globs.length === 1 && globs[0] === "**") return `Every file (${n})`;
+  return `${n} file${n === 1 ? "" : "s"} · ${globs.join(", ")}`;
+}
+
+function renderRec() {
+  const def = findRecipe(rec.id);
+  fill(recBox,
+    h("div", { class: "rec-head" },
+      h("h3", {}, "Display recipes"),
+      h("button", { class: "icon-btn sm", title: "Close (Esc)", html: ICON.x, onclick: () => closeRecipes() })),
+    h("div", { class: "rec-body" },
+      h("div", { class: "rec-list" }, RECIPES.map((r) =>
+        h("button", { class: "rec-item" + (r.id === rec.id ? " on" : ""), onclick: () => {
+          rec.id = r.id;
+          rec.values = {};
+          rec.text = null;
+          renderRec();
+        } },
+          h("b", {}, r.name),
+          h("small", {}, r.blurb)))),
+      h("div", { class: "rec-main" },
+        def.fields?.length ? h("div", { class: "rec-fields" }, def.fields.map((f) =>
+          h("label", { class: "rec-field" },
+            h("span", {}, f.label),
+            h("input", {
+              placeholder: f.placeholder || "", value: rec.values[f.name] || "", spellcheck: "false",
+              oninput: (e) => {
+                rec.values[f.name] = e.target.value;
+                syncRecPrompt();
+              },
+            })))) : null,
+        h("div", { class: "rec-scope" },
+          h("div", { class: "rec-scope-head" },
+            h("span", { class: "rec-sum" }, scopeSummary()),
+            h("button", { class: "btn small", onclick: () => pickScope("file") }, "This file"),
+            h("button", { class: "btn small", onclick: () => pickScope("all") }, "All"),
+            h("button", { class: "btn small", onclick: () => pickScope("none") }, "None")),
+          h("div", { class: "rec-tree" }, recTree())),
+        h("textarea", {
+          class: "rec-prompt", spellcheck: "true", rows: "5",
+          oninput: (e) => {
+            rec.text = e.target.value;
+            syncRecPrompt();
+          },
+        })),
+    ),
+    h("div", { class: "rec-foot" },
+      h("span", {}, S.file ? `Goes in as a comment on ${S.file}` : "Open a file first"),
+      h("button", { class: "btn", onclick: () => addRecipe(false) }, "Add comment"),
+      h("button", { class: "btn primary rec-add", onclick: () => addRecipe(true) }, "Add and send")));
+  recBox.querySelector(".rec-prompt").value = recPrompt();
+  syncRecPrompt();
+  requestAnimationFrame(() => recBox.querySelector(".rec-fields input")?.focus());
+}
+
+function pickScope(what) {
+  if (what === "all") rec.picked = new Set(recFiles().map((f) => f.path));
+  else if (what === "none") rec.picked = new Set();
+  else rec.picked = new Set(S.file ? [S.file] : []);
+  renderRecTree();
+}
+
+function renderRecTree() {
+  const box = recBox.querySelector(".rec-tree");
+  if (box) fill(box, recTree());
+  syncRecPrompt();
+}
+
+// The sidebar's folders again, but as a picker: the folder's own box takes the whole category.
+function recTree() {
+  const out = [];
+  for (const [d, items] of fileGroups(recFiles())) {
+    const on = items.filter((f) => rec.picked.has(f.path)).length;
+    const open = rec.open.has(d);
+    const box = h("input", {
+      type: "checkbox", checked: on === items.length && on > 0,
+      onchange: (e) => {
+        for (const f of items) e.target.checked ? rec.picked.add(f.path) : rec.picked.delete(f.path);
+        renderRecTree();
+      },
+    });
+    // Half-picked folders read as half-picked; only the property shows it, never an attribute.
+    box.indeterminate = on > 0 && on < items.length;
+    out.push(h("div", { class: "rec-dir" }, box,
+      h("button", { class: "rec-dir-name" + (open ? " open" : ""), onclick: () => {
+        rec.open.has(d) ? rec.open.delete(d) : rec.open.add(d);
+        renderRecTree();
+      } },
+        h("span", { class: "caret", html: ICON.caret }),
+        h("span", { class: "dir-nm" }, d || S.wsName || "Files"),
+        h("span", { class: "n" }, on ? `${on}/${items.length}` : String(items.length)))));
+    if (!open) continue;
+    for (const f of items) {
+      out.push(h("label", { class: "rec-file", title: f.path },
+        h("input", {
+          type: "checkbox", checked: rec.picked.has(f.path),
+          onchange: (e) => {
+            e.target.checked ? rec.picked.add(f.path) : rec.picked.delete(f.path);
+            renderRecTree();
+          },
+        }),
+        h("span", { class: "nm" }, f.path.slice(d ? d.length + 1 : 0))));
+    }
+  }
+  return out;
+}
+
+async function addRecipe(andSend) {
+  if (!S.file) return toast("Open a file first: the comment is anchored in one.");
+  if (!rec.picked.size) return toast("Pick at least one file for the rule to apply to.");
+  const text = recPrompt().trim();
+  if (!text) return;
+  try {
+    if (S.dirty) await save();
+    const t = await api("POST", "/api/threads", { file: S.file, anchor: makeAnchor(S.text, 0, 0), text });
+    S.threads.push(t);
+    closeRecipes();
+    if (andSend) await send();
+    else toast("Added. Press Send to AI when you are ready.");
+    scheduleRefresh();
+  } catch (err) {
+    toast(err.message);
+  }
 }
 
 // ---------- hover notes ----------
@@ -1922,6 +2088,8 @@ function wire() {
       } catch {}
     }, 150);
   }, { passive: true });
+  $("openRecipes").addEventListener("click", openRecipes);
+  $("recBackdrop").addEventListener("click", () => closeRecipes());
   $("collapseAll").addEventListener("click", () => setCollapsed(allDirs()));
   $("expandAll").addEventListener("click", () => setCollapsed([]));
   $("paletteBackdrop").addEventListener("click", () => closePalette());
@@ -1954,6 +2122,7 @@ function wire() {
     }
     if (e.key === "Escape") {
       if (palette.classList.contains("on")) return closePalette();
+      if (rec) return closeRecipes();
       if (modal.classList.contains("on")) return closeModal();
       if (S.draft) return cancelDraft();
       if (S.chip) return hideChip();

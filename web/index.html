@@ -38,6 +38,9 @@
       <div class="side-tools">
         <span class="side-count" id="fileCount"></span>
         <span class="side-tool-btns">
+          <button class="icon-btn sm" id="openRecipes" title="Display recipes: ready-made colouring and notes">
+            <svg viewBox="0 0 24 24"><path d="M12 3l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4L7.5 16.8l.9-5L4.8 8.3l5-.7z"/></svg>
+          </button>
           <button class="icon-btn sm" id="collapseAll" title="Collapse all folders">
             <svg viewBox="0 0 24 24"><path d="M7 10l5-5 5 5M7 14l5 5 5-5"/></svg>
           </button>
@@ -88,6 +91,9 @@
     <div class="palette-list" id="paletteList"></div>
     <div class="palette-foot"><span>↑ ↓ to move · ↵ to open</span><span id="paletteHint"></span></div>
   </div>
+
+  <div class="rec-backdrop" id="recBackdrop"></div>
+  <div class="rec" id="rec" role="dialog" aria-modal="true" aria-label="Display recipes"></div>
 
   <div class="modal-backdrop" id="modalBackdrop"></div>
   <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
