@@ -539,7 +539,14 @@ export class Workspace {
           resolve(v);
         },
       };
-      const timer = setTimeout(() => w.resolve({ status: "timeout", hint: "Nothing sent yet. Call review_wait again to keep listening." }), timeoutMs);
+      // The url rides along: a user who never saw the link cannot comment, and this is the one
+      // moment the agent is back in control and can put it in the chat.
+      const timer = setTimeout(() => w.resolve({
+        status: "timeout",
+        url: this.uiUrl ?? null,
+        hint: "Nothing sent yet. Call review_wait again to keep listening. If you have not put the url in a chat " +
+          "message yet, write it out now before you wait again, on its own line, or the user has no way in.",
+      }), timeoutMs);
       signal?.addEventListener("abort", () => w.resolve({ status: "cancelled" }));
       this.waiters.push(w);
       this.emitStatus();

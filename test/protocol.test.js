@@ -32,6 +32,8 @@ test("full round: open, comment via HTTP, wait receives it, AI resolves", async 
   proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18" } }) + "\n");
   try {
     const open = await call(1, "review_open", { path: dir, open_browser: false });
+    // The agent has to be told to put the url in the chat: review_wait blocks for minutes after it.
+    assert.match(open.next, /chat message FIRST/);
     const u = new URL(open.url);
     const ws = u.searchParams.get("ws");
     const t = u.searchParams.get("t");

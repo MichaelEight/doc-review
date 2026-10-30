@@ -9,13 +9,34 @@ The user reads the file in a local web page, selects text (or clicks a spot) and
 margin. Nothing reaches you until they press **Send to AI**. You get all the comments together,
 make the edits, and answer each comment in its thread.
 
+## Always give the user the link, in the chat, first
+
+`review_wait` blocks for minutes. Anything you write after calling it reaches the user when the
+wait is over, which is far too late: until they open the page they cannot comment, so nothing
+will ever arrive and you will both sit there waiting. The browser may also not have opened, the
+page may be on another machine, and they may simply have lost the tab.
+
+So the order is always: call `review_open`, **write the `url` out in a chat message**, then call
+`review_wait`. Never the other way round, and never only in a tool call.
+
+- Write the literal address on a line of its own, for example
+  `http://127.0.0.1:4848/?ws=a1b2c3d4e5&t=…`. Not "the link above", not "the UI is live at the
+  link", not a bare word linked to it. The address itself, in full, so it can be copied.
+- Say in one line what is open (the folder and how many files) and that you are waiting for
+  **Send to AI**.
+- The `review_wait` timeout result carries the `url` again. If you reach a timeout and have not
+  put the link in the chat yet, write it out before waiting again.
+- Repeat the address when you report back after `review_finish`, and whenever the user sounds
+  like they cannot find the page.
+
 ## Loop
 
-1. `review_open(path)`: a folder, or a file (its folder becomes the workspace). Give the user the
-   `url`; it opens in their browser by default.
-2. `review_wait()` blocks until they press Send. On `{status: "timeout"}` call it again. Don't
+1. `review_open(path)`: a folder, or a file (its folder becomes the workspace). It also tries to
+   open the page in their browser, which is a convenience, not a substitute for the link.
+2. Write the `url` in the chat, as above.
+3. `review_wait()` blocks until they press Send. On `{status: "timeout"}` call it again. Don't
    tell the user each time; keep listening quietly.
-3. For every entry in `comments`:
+4. For every entry in `comments`:
    - Read `quote`, `line`, `context_before`/`context_after` and the whole `messages` thread
      (entries marked `new` are what they just sent). `target: "point"` means "at this spot":
      usually insert something there.
@@ -28,9 +49,9 @@ make the edits, and answer each comment in its thread.
      - need an answer first: `review_reply(id, text, kind: "question")`. Leave the thread open;
        the answer arrives in a later `review_wait`. Don't guess on anything that matters.
      - explaining without closing: `review_reply(id, text)` (kind `note`).
-4. `review_finish(summary)` with one line about what changed. The UI then shows your diff, and
+5. `review_finish(summary)` with one line about what changed. The UI then shows your diff, and
    the user accepts or reverts each change.
-5. `review_wait()` again for the next round. Stop when the user says they're done in chat.
+6. `review_wait()` again for the next round. Stop when the user says they're done in chat.
 
 ## Slash commands
 
@@ -61,8 +82,8 @@ it whenever the user asks for something like "colour this nick blue", "grey out 
 command. Never edit the document to satisfy such a request.
 
 A rule has a `scope` (workspace-relative globs, so one rule can cover one file, a folder or
-everything), a `match` (a `literal`, or a `regex` with an optional capture `group`), and a
-`style` (`color`, `bg`, `bold`, `italic`, `underline`, `strike`, `dim`).
+everything), a `match` (a `literal`, or a `regex` with an optional capture `group`), and then a
+`style` (`color`, `bg`, `bold`, `italic`, `underline`, `strike`, `dim`), an `annotate`, or both.
 
 ```
 review_style(rules: [{
@@ -80,6 +101,33 @@ review_style(rules: [{
 - `op: "list"` (optionally for one `file`) shows what is set; `op: "clear"` removes rules by
   `ids`, or all of them. Pass an existing `id` in `set` to tune a rule instead of adding another.
 - The user can switch any rule off in the sidebar, so say what you added and let them try it.
+
+### Notes on a match
+
+`annotate` attaches a note to every match. `show: "hover"` (the default) puts it in a tooltip,
+`show: "inline"` draws it right after the match. A note is decoration: it is never written to the
+file, cannot be selected or copied, and shows in the reading view only, because the source view
+has to line up with the file character for character.
+
+In `annotate.text`, `$0` is the whole match and `$1`… its capture groups. `{delta}` is the gap
+from this rule's previous match, written `+0h 0m 16s`, and needs `annotate.delta` set: each match
+is then read as a time (`2013-11-15 16:02:59`, `2013-11-15T16:02`, or a bare `16:02:59`, which
+wraps at midnight). `delta.group` reads a capture group instead of the whole match. The first
+match has nothing to compare against, so it gets no note.
+
+"How long between these lines?" on a chat log is therefore:
+
+```
+review_style(rules: [{
+  label: "gap since previous line",
+  scope: ["chats/*.txt"],
+  match: { regex: "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}", flags: "m" },
+  annotate: { text: "{delta}", show: "inline", delta: {} },
+}])
+```
+
+Keep notes short: they sit in the middle of the text. A whole sentence belongs in a comment
+thread, not in an annotation.
 
 ## Comments made on the PDF
 
@@ -99,6 +147,8 @@ match looks loose, for example on math.
 
 ## Rules
 
+- The url goes in a chat message before the first `review_wait`, written out in full. Without it
+  the user cannot reach the page and the wait never ends.
 - While a round is open the UI is read-only for the user, so don't leave rounds hanging: always
   `review_finish` when you're done, even if you only asked questions.
 - To raise a point yourself (a doubt, a fact to check), use

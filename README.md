@@ -78,7 +78,7 @@ the spot; add `all` (for `/fix`) to cover the whole file.
 | `/check [what]` | Fact-checks; replies with a verdict and sources |
 | `/define [term]` | Proposes a footnote or glossary entry, adds it once you agree |
 | `/consistency [@file]` | Makes terms, spelling and tense consistent, optionally against another file |
-| `/style <how>` | Sets up colouring for the view: a nick, a pattern, a kind of line (see below) |
+| `/style <how>` | Sets up colouring or notes for the view: a nick, a pattern, a kind of line, the gap between lines (see below) |
 | `/graph [what]` | Plots the data with matplotlib into `figures/` and inserts the image |
 
 Editing is locked while the AI is working (comments still work) and while there are AI changes
@@ -86,18 +86,28 @@ waiting for review. This keeps your edits from mixing into the AI's diff.
 
 ### Display rules
 
-Colouring that changes how a file looks, never what it holds. You ask for it in a comment, in
-plain words: *"colour this nick blue"*, *"grey out everything in `<>`"*, *"dim the timestamps in
-the whole logs folder"*. The AI turns that into rules with `review_style`; the document on disk
-is untouched.
+Colouring and notes that change how a file looks, never what it holds. You ask for it in a
+comment, in plain words: *"colour this nick blue"*, *"grey out everything in `<>`"*, *"dim the
+timestamps in the whole logs folder"*, *"show me how long passed since the previous line"*. The
+AI turns that into rules with `review_style`; the document on disk is untouched.
 
-A rule is a scope, a match and a style:
+A rule is a scope, a match, and then a style, a note, or both:
 
 | Part | What |
 |---|---|
 | `scope` | Workspace-relative globs. `["notes.md"]` one file, `["logs/*.txt"]` a folder, `["chats/**"]` a tree, `["**"]` everything (the default). `*` stays inside one path segment, `**` crosses folders. |
 | `match` | A `literal` (with `ignoreCase`, `wholeWord`) or a `regex` (with `flags` of `i`/`m`/`s` and an optional capture `group` to paint only part of the match). |
 | `style` | `color`, `bg`, `bold`, `italic`, `underline`, `strike`, `dim`. Colours are plain CSS colours and nothing else. |
+| `annotate` | A note on every match. `text` takes `$0` for the match, `$1`… for capture groups, and `{delta}` for the gap since the rule's previous match. `show` is `hover` (a tooltip) or `inline` (drawn after the match). |
+
+`{delta}` needs `annotate.delta`, which reads each match as a time: `2013-11-15 16:02:59`,
+`2013-11-15T16:02`, or a bare `16:02:59` that wraps at midnight. It is written the way it reads
+out loud, `+0h 0m 16s`, with a day count only when there is one. The first match has nothing to
+compare against, so it gets no note.
+
+Notes are decoration. They are never written to the file, cannot be selected or copied, and
+appear in the reading view only: the source view's overlay has to line up with the textarea
+underneath it character for character, so nothing that is not in the file can be drawn there.
 
 Rules show up in a **Display rules** panel at the bottom of the sidebar, listing the ones that
 apply to the open file with a preview of each. The checkbox switches a rule off without deleting
@@ -111,14 +121,14 @@ shared between the UI and the agent. They are per workspace, not per user.
 
 | Tool | What |
 |---|---|
-| `review_open` | Open a folder/file in the UI, return the URL. |
-| `review_wait` | Block until the user sends comments (`timeout_seconds`, default 540; returns `{status:"timeout"}` to re-call). Ends the previous round. |
+| `review_open` | Open a folder/file in the UI, return the URL. The agent writes that URL in the chat before it waits: `review_wait` blocks for minutes, so a link sent after it arrives too late to be useful. |
+| `review_wait` | Block until the user sends comments (`timeout_seconds`, default 540; returns `{status:"timeout"}`, with the URL again, to re-call). Ends the previous round. |
 | `review_reply` | Post in a thread: `kind` `note` or `question`. |
 | `review_resolve` | Resolve a thread with a short note. |
 | `review_comment` | AI starts a thread on an exact quote. |
 | `review_finish` | End the round with a summary; the UI unlocks and shows the diff. |
 | `review_threads` | List threads with current positions. |
-| `review_style` | Set, list or clear display rules: colouring for how files are shown. |
+| `review_style` | Set, list or clear display rules: colouring and notes for how files are shown. |
 | `review_define_tag` | Define a `#tag` for the workspace. |
 
 ## How anchoring works

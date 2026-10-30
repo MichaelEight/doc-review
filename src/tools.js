@@ -13,7 +13,8 @@ export const TOOLS = [
     name: "review_open",
     description:
       "Open a folder (or the folder of a file) in the doc-review web UI and return its URL. The user reads, edits and comments " +
-      "on .md/.txt/.tex files there, then presses \"Send to AI\". Call review_wait next to receive the comments.",
+      "on .md/.txt/.tex files there, then presses \"Send to AI\". Put the returned url in a chat message before you call " +
+      "review_wait, which blocks for minutes and keeps anything said after it from reaching the user in time.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -29,7 +30,8 @@ export const TOOLS = [
     description:
       "Block until the user presses \"Send to AI\", then return every new comment with its file, line, quoted text, context and " +
       "thread history, plus referenced @files and #tags. Ends the previous round. Returns {status:\"timeout\"} after " +
-      "timeout_seconds; then call it again to keep listening.",
+      "timeout_seconds; then call it again to keep listening. This blocks for minutes, so make sure the UI url is already " +
+      "in a chat message before you call it.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -103,10 +105,11 @@ export const TOOLS = [
   {
     name: "review_style",
     description:
-      "Set, list or clear display rules: colouring that changes how files are SHOWN in the UI and never touches what they " +
-      "contain. A rule matches a literal or a regular expression and paints it (colour, background, bold, italic, underline, " +
-      "strike, dim) in the files its scope globs select. Use it when the user asks for something like \"colour this nick blue\", " +
-      "\"give the text in <> a grey background\" or \"dim the timestamps\" in a comment. Rules are per workspace and persist.",
+      "Set, list or clear display rules: colouring and notes that change how files are SHOWN in the UI and never touch what " +
+      "they contain. A rule matches a literal or a regular expression in the files its scope globs select, then paints it " +
+      "(colour, background, bold, italic, underline, strike, dim), attaches a note to it (on hover or inline), or both. Use it " +
+      "when the user asks for something like \"colour this nick blue\", \"give the text in <> a grey background\", \"dim the " +
+      "timestamps\" or \"on hover show how long since the previous line\". Rules are per workspace and persist.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -122,7 +125,7 @@ export const TOOLS = [
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["match", "style"],
+            required: ["match"],
             properties: {
               id: { type: "string", description: "Update an existing rule instead of adding one." },
               label: { type: "string", description: "Short name shown in the UI's rule list, e.g. \"nick: xxSLAYERCATxx\"." },
@@ -156,6 +159,33 @@ export const TOOLS = [
                   underline: { type: "boolean" },
                   strike: { type: "boolean" },
                   dim: { type: "boolean", description: "Fade the text, for noise like timestamps." },
+                },
+              },
+              annotate: {
+                type: "object",
+                additionalProperties: false,
+                required: ["text"],
+                description:
+                  "Attach a note to every match. The note is decoration: it is never written to the file, cannot be selected " +
+                  "or copied, and shows only in the reading view (the source view has to line up with the file). A rule may " +
+                  "annotate without styling.",
+                properties: {
+                  text: {
+                    type: "string",
+                    description:
+                      "The note. \"$0\" is the whole match and \"$1\"… its capture groups, so \"said by $1\" works. \"{delta}\" is " +
+                      "the gap from this rule's previous match, formatted \"+0h 0m 16s\", and needs delta set.",
+                  },
+                  show: { type: "string", enum: ["hover", "inline"], description: "hover (default) shows it in a tooltip; inline draws it right after the match." },
+                  delta: {
+                    type: "object",
+                    additionalProperties: false,
+                    description:
+                      "Read each match as a time and work out the gap from the previous one, for \"{delta}\". Understands " +
+                      "\"2013-11-15 16:02:59\", \"2013-11-15T16:02\" and a bare \"16:02:59\" (which wraps at midnight). The " +
+                      "first match of a rule has no previous one, so it gets no note.",
+                    properties: { group: { type: "number", description: "Read this capture group as the time instead of the whole match." } },
+                  },
                 },
               },
               enabled: { type: "boolean", description: "Default true. The user can also switch a rule off in the UI." },
@@ -214,11 +244,14 @@ export function makeHandlers(registry, http) {
       ws.emitStatus();
       await http.listen();
       const url = http.url(ws, isFile ? ws.rel(abs) : null);
+      ws.uiUrl = http.url(ws);
       if (open_browser && process.platform === "darwin") execFile("open", [url], () => {});
       else if (open_browser && process.platform === "linux") execFile("xdg-open", [url], () => {});
       const open = ws.state.threads.filter((t) => t.status === "open").length;
       return { url, root: ws.root, files: ws.listFiles().filter((f) => f.editable).length, open_comments: open, ...ws.status(),
-        next: "Tell the user the URL, then call review_wait." };
+        next: "Write the url out in a chat message FIRST, on its own line, as the literal address. Only then call " +
+          "review_wait, which blocks for minutes: anything you say after it is said too late, and the user is left " +
+          "with no way into the review." };
     },
 
     async review_wait({ root, timeout_seconds = 540 }, ctx) {

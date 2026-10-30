@@ -32,7 +32,7 @@ function segClass(rs) {
   return "seg hl" + [...kinds].map((k) => " hl-" + k).join("") + (rs.length > 1 ? " hl-multi" : "");
 }
 
-function runToNodes(run, { ranges, pins, styles }) {
+function runToNodes(run, { ranges, pins, styles, notes }) {
   const a = run.s;
   const b = run.s + run.run.length;
   const cuts = new Set([0, run.run.length]);
@@ -41,7 +41,8 @@ function runToNodes(run, { ranges, pins, styles }) {
     if (r.end > a && r.end < b) cuts.add(r.end - a);
   }
   const here = pins.filter((p) => !p.placed && p.pos >= a && p.pos <= b);
-  for (const p of here) cuts.add(p.pos - a);
+  const hereNotes = notes.filter((n) => !n.placed && n.pos >= a && n.pos <= b);
+  for (const p of [...here, ...hereNotes]) cuts.add(p.pos - a);
   const pts = [...cuts].sort((x, y) => x - y);
   const out = [];
   for (let k = 0; k < pts.length; k++) {
@@ -49,6 +50,12 @@ function runToNodes(run, { ranges, pins, styles }) {
       if (!p.placed && p.pos - a === pts[k]) {
         p.placed = true;
         out.push(pinEl(p));
+      }
+    }
+    for (const n of hereNotes) {
+      if (!n.placed && n.pos - a === pts[k]) {
+        n.placed = true;
+        out.push(noteEl(n));
       }
     }
     if (k === pts.length - 1) break;
@@ -60,12 +67,26 @@ function runToNodes(run, { ranges, pins, styles }) {
     if (rs.length) span.dataset.ids = rs.map((r) => r.id).join(" ");
     // Display rules paint underneath the comment highlights; later rules win.
     const sty = cover(styles, s, e);
-    if (sty.length) span.style.cssText = sty.map((x) => x.css).join(";");
+    if (sty.length) {
+      const css = sty.map((x) => x.css).filter(Boolean).join(";");
+      if (css) span.style.cssText = css;
+      const hov = sty.filter((x) => x.note && x.show === "hover").map((x) => x.note);
+      if (hov.length) span.dataset.note = hov.join(" · ");
+    }
     span.dataset.s = s;
     span.textContent = run.run.slice(pts[k], pts[k + 1]);
     out.push(span);
   }
   return out;
+}
+
+// An inline note is decoration, not text: it carries no source offset and cannot be selected, so
+// it stays out of copied text and out of the offsets a comment anchors on.
+function noteEl(n) {
+  const s = document.createElement("span");
+  s.className = "note";
+  s.textContent = n.text;
+  return s;
 }
 
 function pinEl(p) {
@@ -137,11 +158,12 @@ function build(node, ctx) {
 }
 
 // threads: [{ id, start, end, kind }] already resolved against the current text.
-// styles:  [{ start, end, css }] from the workspace's display rules.
-export function renderTree(tree, threads, rawUrl, styles = []) {
+// marks:   [{ start, end, css, note, show }] from the workspace's display rules.
+export function renderTree(tree, threads, rawUrl, marks = []) {
   const ranges = threads.filter((t) => t.end > t.start);
   const pins = threads.filter((t) => t.end === t.start).map((t) => ({ id: t.id, pos: t.start, kind: t.kind, placed: false }));
-  const frag = build(tree, { ranges, pins, styles, rawUrl });
+  const notes = marks.filter((x) => x.note && x.show === "inline").map((x) => ({ pos: x.end, text: x.note, placed: false }));
+  const frag = build(tree, { ranges, pins, styles: marks, notes, rawUrl });
   const root = document.createElement("div");
   root.append(frag);
   // Point comments between blocks: put the pin before the first block that starts after it.
@@ -238,6 +260,8 @@ function syntaxTokens(text, kind) {
   return toks;
 }
 
+// Notes are left out here on purpose: this overlay must match the textarea character for
+// character, so nothing that is not in the file may be drawn into it.
 export function buildBackdrop(text, threads, kind, styles = []) {
   const ranges = threads.filter((t) => t.end > t.start);
   const pins = threads.filter((t) => t.end === t.start);
@@ -260,12 +284,13 @@ export function buildBackdrop(text, threads, kind, styles = []) {
     const syn = [];
     for (let j = ti; j < toks.length && toks[j][0] <= s; j++) if (toks[j][1] >= e) syn.push(toks[j][2]);
     const rs = cover(ranges, s, e);
-    const sty = cover(styles, s, e);
+    // Annotation-only rules carry no css, so they add nothing here.
+    const css = cover(styles, s, e).map((x) => x.css).filter(Boolean).join(";");
     const cls = [...new Set(syn)].join(" ") + (rs.length ? " " + segClass(rs) : "");
     const body = esc(text.slice(s, e));
     const attrs = (cls.trim() ? ` class="${cls.trim()}"` : "") +
       (rs.length ? ` data-ids="${rs.map((r) => r.id).join(" ")}"` : "") +
-      (sty.length ? ` style="${esc(sty.map((x) => x.css).join(";"))}"` : "");
+      (css ? ` style="${esc(css)}"` : "");
     html += attrs ? `<span${attrs}>${body}</span>` : body;
   }
   return html + "\n ";

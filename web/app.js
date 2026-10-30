@@ -1,6 +1,6 @@
 import { parseMarkdown, parsePlain } from "./markdown.js";
 import { renderTree, selectionToSource, pointToSource, caretAt, buildBackdrop } from "./view.js";
-import { rulesFor, styleRanges, styleCss, matchesScope } from "./display.js";
+import { rulesFor, ruleRanges, styleCss, matchesScope } from "./display.js";
 import { makeAnchor, resolveAnchor, lineOf } from "./anchor.js";
 import { offsetMapper, mapRange } from "./remap.js";
 import { diffLines, diffWords, acceptHunk, revertHunk, splitLines } from "./diff.js";
@@ -27,6 +27,9 @@ const h = (tag, attrs = {}, ...kids) => {
   for (const k of kids.flat()) if (k != null && k !== false) e.append(k);
   return e;
 };
+// replaceChildren is the raw DOM call, which turns a null child into the text "null". Use this
+// wherever a child is conditional.
+const fill = (el, ...kids) => el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 const ICON = {
@@ -125,17 +128,17 @@ function rangesForRender() {
   return out;
 }
 
-// Display-rule ranges for the open file. Running every rule over the whole text on each render
+// Display-rule marks for the open file. Running every rule over the whole text on each render
 // would be wasteful, so the result is kept until the text or the rules change.
-let styleCache = { text: null, rules: null, ranges: [] };
+let markCache = { text: null, rules: null, marks: [] };
 
-function stylesForRender() {
+function marksForRender() {
   const rules = S.file ? rulesFor(S.styles, S.file) : [];
   if (!rules.length) return [];
   const key = JSON.stringify(rules);
-  if (styleCache.text === S.text && styleCache.rules === key) return styleCache.ranges;
-  styleCache = { text: S.text, rules: key, ranges: styleRanges(S.text, rules) };
-  return styleCache.ranges;
+  if (markCache.text === S.text && markCache.rules === key) return markCache.marks;
+  markCache = { text: S.text, rules: key, marks: ruleRanges(S.text, rules) };
+  return markCache.marks;
 }
 
 function resolveAll(keepLive = false) {
@@ -366,7 +369,7 @@ function renderStylePanel() {
   box.classList.toggle("on", mine.length > 0);
   if (!mine.length) return void box.replaceChildren();
   const open = !S.stylePanelShut;
-  box.replaceChildren(
+  fill(box,
     h("button", { class: "style-head" + (open ? " open" : ""), title: open ? "Hide the rules" : "Show the rules", onclick: () => {
       S.stylePanelShut = open;
       store.set("stylePanelShut", S.stylePanelShut);
@@ -380,6 +383,28 @@ function renderStylePanel() {
         h("input", { type: "checkbox", checked: r.enabled !== false, onchange: (e) => toggleStyleRule(r, e.target.checked) }),
         h("span", { class: "sw", style: styleCss(r.style) || null }, "Aa"),
         h("span", { class: "rl" }, r.label)))) : null);
+}
+
+// ---------- hover notes ----------
+
+const noteTip = $("noteTip");
+let tipFor = null;
+
+function showNoteTip(el) {
+  if (tipFor === el) return;
+  tipFor = el;
+  noteTip.textContent = el.dataset.note;
+  noteTip.classList.add("on");
+  const r = el.getBoundingClientRect();
+  const w = noteTip.offsetWidth;
+  const h = noteTip.offsetHeight;
+  noteTip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + "px";
+  noteTip.style.top = (r.top - h - 8 < 8 ? r.bottom + 8 : r.top - h - 8) + "px";
+}
+
+function hideNoteTip() {
+  tipFor = null;
+  noteTip.classList.remove("on");
 }
 
 async function toggleStyleRule(rule, enabled) {
@@ -490,7 +515,7 @@ function viewEl() {
 
 function renderDoc() {
   const tree = S.kind === "md" ? parseMarkdown(S.text) : parsePlain(S.text);
-  const dom = renderTree(tree, rangesForRender(), (p) => rawUrl(relToFile(p)), stylesForRender());
+  const dom = renderTree(tree, rangesForRender(), (p) => rawUrl(relToFile(p)), marksForRender());
   const doc = $("doc");
   // Re-rendering replaces the text nodes; carry a live selection over to the new ones.
   const sel = window.getSelection();
@@ -516,7 +541,7 @@ function renderSource() {
 }
 
 function paintBackdrop() {
-  $("backdrop").innerHTML = buildBackdrop(S.text, rangesForRender(), S.kind === "txt" ? "txt" : S.kind, stylesForRender());
+  $("backdrop").innerHTML = buildBackdrop(S.text, rangesForRender(), S.kind === "txt" ? "txt" : S.kind, marksForRender());
   // Shrinking to "auto" to measure would clamp the page scroll; pin the wrapper height meanwhile.
   const wrap = $("srcWrap");
   const sc = $("scroller");
@@ -1250,7 +1275,7 @@ function fillModal(t) {
       m.kind === "question" ? h("span", { class: "tagq" }, "Question") : null,
       h("div", { class: "msg-text", html: richText(m.text) }),
       msgMeta(t, m))));
-  modal.replaceChildren(
+  fill(modal,
     h("div", { class: "modal-head" },
       h("h3", {}, `${t.file}${r ? " · line " + lineOf(S.text, r.start) : ""}`),
       h("button", { class: "btn small " + (resolved ? "" : "ok"), onclick: () => setThreadStatus(t, resolved ? "open" : "resolved") }, resolved ? "Reopen" : "Resolve"),
@@ -1912,7 +1937,13 @@ function wire() {
     layoutCards();
     hideChip();
   });
-  $("scroller").addEventListener("scroll", () => hideChip(), { passive: true });
+  $("doc").addEventListener("mouseover", (e) => {
+    const el = e.target.closest?.("[data-note]");
+    if (el) showNoteTip(el);
+    else hideNoteTip();
+  });
+  $("doc").addEventListener("mouseleave", hideNoteTip);
+  $("scroller").addEventListener("scroll", () => (hideChip(), hideNoteTip()), { passive: true });
   new ResizeObserver(() => layoutCards()).observe($("docCol"));
 
   document.addEventListener("keydown", (e) => {
