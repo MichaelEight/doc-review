@@ -47,11 +47,39 @@ What to do depends on `action`:
   a later round.
 
 The commands are `/fix`, `/simplify`, `/explain`, `/rewrite`, `/shorten`, `/expand`,
-`/translate`, `/format`, `/continue`, `/summarize`, `/check`, `/define`, `/consistency` and
-`/graph`.
+`/translate`, `/format`, `/continue`, `/summarize`, `/check`, `/define`, `/consistency`,
+`/style` and `/graph`.
 
 `/graph` writes `figures/<name>.py` and `figures/<name>.png` next to the document with
 matplotlib, then inserts the image. Ask the user before installing matplotlib if it is missing.
+
+## Display rules
+
+`review_style` sets colouring that changes how a file is **shown**, never what it contains. Use
+it whenever the user asks for something like "colour this nick blue", "grey out the text in
+`<>`", "give these lines a background" or "dim the timestamps", with or without the `/style`
+command. Never edit the document to satisfy such a request.
+
+A rule has a `scope` (workspace-relative globs, so one rule can cover one file, a folder or
+everything), a `match` (a `literal`, or a `regex` with an optional capture `group`), and a
+`style` (`color`, `bg`, `bold`, `italic`, `underline`, `strike`, `dim`).
+
+```
+review_style(rules: [{
+  label: "nick: xxSLAYERCATxx",
+  scope: ["logs/*.txt"],
+  match: { literal: "xxSLAYERCATxx" },
+  style: { bg: "rgba(250,196,21,.22)", bold: true },
+}])
+```
+
+- Scope to the file the comment is on unless the user asks wider. `["**"]` is every file.
+- Pick colours that work in both the light and the dark theme: a mid-tone `color` and a
+  translucent `rgba` `bg`. Never pure black or white, never an opaque background.
+- Rules overlap freely; a later rule's declarations win on the text they share.
+- `op: "list"` (optionally for one `file`) shows what is set; `op: "clear"` removes rules by
+  `ids`, or all of them. Pass an existing `id` in `set` to tune a rule instead of adding another.
+- The user can switch any rule off in the sidebar, so say what you added and let them try it.
 
 ## Comments made on the PDF
 
@@ -75,4 +103,4 @@ match looks loose, for example on math.
   `review_finish` when you're done, even if you only asked questions.
 - To raise a point yourself (a doubt, a fact to check), use
   `review_comment(file, quote, text)` instead of burying it in chat.
-- Never edit `.doc-review/` by hand. It holds the comment store and baselines.
+- Never edit `.doc-review/` by hand. It holds the comment store, the display rules and baselines.

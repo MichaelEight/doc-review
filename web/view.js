@@ -32,11 +32,11 @@ function segClass(rs) {
   return "seg hl" + [...kinds].map((k) => " hl-" + k).join("") + (rs.length > 1 ? " hl-multi" : "");
 }
 
-function runToNodes(run, ranges, pins) {
+function runToNodes(run, { ranges, pins, styles }) {
   const a = run.s;
   const b = run.s + run.run.length;
   const cuts = new Set([0, run.run.length]);
-  for (const r of ranges) {
+  for (const r of [...ranges, ...styles]) {
     if (r.start > a && r.start < b) cuts.add(r.start - a);
     if (r.end > a && r.end < b) cuts.add(r.end - a);
   }
@@ -58,6 +58,9 @@ function runToNodes(run, ranges, pins) {
     const rs = cover(ranges, s, e);
     span.className = segClass(rs);
     if (rs.length) span.dataset.ids = rs.map((r) => r.id).join(" ");
+    // Display rules paint underneath the comment highlights; later rules win.
+    const sty = cover(styles, s, e);
+    if (sty.length) span.style.cssText = sty.map((x) => x.css).join(";");
     span.dataset.s = s;
     span.textContent = run.run.slice(pts[k], pts[k + 1]);
     out.push(span);
@@ -76,7 +79,7 @@ function pinEl(p) {
 const SAFE_URL = /^(https?:|mailto:|#|\.{0,2}\/|[\w./%-]+$)/i;
 
 function build(node, ctx) {
-  if (node.run != null) return runToNodes(node, ctx.ranges, ctx.pins);
+  if (node.run != null) return runToNodes(node, ctx);
   const { tag } = node;
   let dom;
   if (tag === "math") {
@@ -134,10 +137,11 @@ function build(node, ctx) {
 }
 
 // threads: [{ id, start, end, kind }] already resolved against the current text.
-export function renderTree(tree, threads, rawUrl) {
+// styles:  [{ start, end, css }] from the workspace's display rules.
+export function renderTree(tree, threads, rawUrl, styles = []) {
   const ranges = threads.filter((t) => t.end > t.start);
   const pins = threads.filter((t) => t.end === t.start).map((t) => ({ id: t.id, pos: t.start, kind: t.kind, placed: false }));
-  const frag = build(tree, { ranges, pins, rawUrl });
+  const frag = build(tree, { ranges, pins, styles, rawUrl });
   const root = document.createElement("div");
   root.append(frag);
   // Point comments between blocks: put the pin before the first block that starts after it.
@@ -234,12 +238,12 @@ function syntaxTokens(text, kind) {
   return toks;
 }
 
-export function buildBackdrop(text, threads, kind) {
+export function buildBackdrop(text, threads, kind, styles = []) {
   const ranges = threads.filter((t) => t.end > t.start);
   const pins = threads.filter((t) => t.end === t.start);
   const toks = syntaxTokens(text, kind);
   const cuts = new Set([0, text.length]);
-  for (const r of ranges) cuts.add(Math.min(r.start, text.length)), cuts.add(Math.min(r.end, text.length));
+  for (const r of [...ranges, ...styles]) cuts.add(Math.min(r.start, text.length)), cuts.add(Math.min(r.end, text.length));
   for (const t of toks) cuts.add(t[0]), cuts.add(t[1]);
   for (const p of pins) cuts.add(Math.min(p.start, text.length));
   const pts = [...cuts].sort((a, b) => a - b);
@@ -256,9 +260,13 @@ export function buildBackdrop(text, threads, kind) {
     const syn = [];
     for (let j = ti; j < toks.length && toks[j][0] <= s; j++) if (toks[j][1] >= e) syn.push(toks[j][2]);
     const rs = cover(ranges, s, e);
+    const sty = cover(styles, s, e);
     const cls = [...new Set(syn)].join(" ") + (rs.length ? " " + segClass(rs) : "");
     const body = esc(text.slice(s, e));
-    html += cls.trim() ? `<span class="${cls.trim()}"${rs.length ? ` data-ids="${rs.map((r) => r.id).join(" ")}"` : ""}>${body}</span>` : body;
+    const attrs = (cls.trim() ? ` class="${cls.trim()}"` : "") +
+      (rs.length ? ` data-ids="${rs.map((r) => r.id).join(" ")}"` : "") +
+      (sty.length ? ` style="${esc(sty.map((x) => x.css).join(";"))}"` : "");
+    html += attrs ? `<span${attrs}>${body}</span>` : body;
   }
   return html + "\n ";
 }

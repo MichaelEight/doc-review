@@ -163,6 +163,22 @@ export const COMMANDS = [
       "majority usage in this file. Do not change meaning. Resolve with a short list of the conventions you settled on.",
   },
   {
+    name: "style",
+    args: "<how>",
+    summary: "Colour something in the view, without touching the file",
+    action: "reply",
+    params: [{ name: "how", desc: "What to colour and how, e.g. \"this nick blue\", \"text in <> grey\", \"dim the timestamps\". Add \"here\" for this file only, \"everywhere\" for the whole folder." }],
+    examples: ["/style this nick blue", "/style text in <> grey, this file only", "/style dim the timestamps everywhere"],
+    instructions:
+      "Set up display rules with review_style. These change only how the file is SHOWN; never edit the document for this. " +
+      "Work out what to match from the selected text and the arguments: a literal for a name or word, a regex for a pattern " +
+      "(e.g. \"<[^>]+>\" for text in angle brackets, a date at the start of a line for timestamps). Scope: this file alone " +
+      "unless the user asks wider; use a glob like \"logs/*.txt\" for a folder, [\"**\"] for everything. Pick colours that " +
+      "stay readable in both the light and the dark theme: a translucent background (rgba) and a mid-tone colour, never pure " +
+      "black or white. Reply with kind=note listing each rule you added (what it matches, where it applies) and mention that " +
+      "the rules can be switched off in the sidebar. Do not resolve the thread if the user may want to tune the colours.",
+  },
+  {
     name: "graph",
     args: "[what]",
     summary: "Plot data as a chart and insert the image",

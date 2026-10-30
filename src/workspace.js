@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { resolveAnchor, makeAnchor, lineOf, extractRefs } from "../web/anchor.js";
 import { offsetMapper, mapRange } from "../web/remap.js";
 import { parseCommand } from "../web/commands.js";
+import { normalizeRule, rulesFor } from "../web/display.js";
 
 export const EDITABLE = new Set([".md", ".markdown", ".txt", ".tex", ".bib"]);
 const SKIP_DIRS = new Set(["node_modules", ".git", ".doc-review", "dist", "build", "__pycache__", ".venv", "venv"]);
@@ -43,7 +44,7 @@ export class Workspace {
   // ---------- persistence ----------
 
   load() {
-    const empty = { version: 1, threads: [], rounds: [], tags: {} };
+    const empty = { version: 1, threads: [], rounds: [], tags: {}, styles: [] };
     try {
       this.state = { ...empty, ...JSON.parse(fs.readFileSync(this.file, "utf8")) };
     } catch {
@@ -250,6 +251,47 @@ export class Workspace {
     return out;
   }
 
+  // Plain substring search over the editable files, for the quick-search palette. Case-insensitive,
+  // a few hits per file so one big file cannot fill the list.
+  searchText(query, { limit = 80, perFile = 4 } = {}) {
+    const needle = String(query || "").trim().toLowerCase();
+    if (needle.length < 2) return [];
+    const out = [];
+    for (const f of this.listFiles()) {
+      if (out.length >= limit) break;
+      if (!f.editable) continue;
+      let text;
+      try {
+        const abs = this.resolve(f.path);
+        if (fs.statSync(abs).size > MAX_EDITABLE_BYTES) continue;
+        text = fs.readFileSync(abs, "utf8");
+      } catch {
+        continue;
+      }
+      const hay = text.toLowerCase();
+      let at = hay.indexOf(needle);
+      let n = 0;
+      while (at !== -1 && n < perFile && out.length < limit) {
+        const ls = text.lastIndexOf("\n", at - 1) + 1;
+        const le = text.indexOf("\n", at) === -1 ? text.length : text.indexOf("\n", at);
+        // Keep the snippet short, with the hit inside it.
+        const from = Math.max(ls, at - 48);
+        const to = Math.min(le, at + needle.length + 96);
+        out.push({
+          path: f.path,
+          line: lineOf(text, at),
+          start: at,
+          end: at + needle.length,
+          snippet: (from > ls ? "…" : "") + text.slice(from, to) + (to < le ? "…" : ""),
+          mark: [(from > ls ? 1 : 0) + (at - from), (from > ls ? 1 : 0) + (at - from) + needle.length],
+        });
+        at = hay.indexOf(needle, at + needle.length);
+        n++;
+      }
+    }
+    return out;
+  }
+
   readFile(rel) {
     const abs = this.resolve(rel);
     const st = fs.statSync(abs);
@@ -407,6 +449,53 @@ export class Workspace {
     this.save();
     this.emit({ type: "threads" });
     return { tag: key, ...this.state.tags[key] };
+  }
+
+  // ---------- display rules ----------
+  //
+  // Colouring that applies to how a file is shown, never to what it contains. Rules live in
+  // comments.json next to the threads, so they sync between the agent and the UI like everything
+  // else and the documents themselves stay untouched.
+
+  styleRules(file) {
+    const all = this.state.styles || [];
+    return file ? rulesFor(all, file) : all;
+  }
+
+  setStyleRules(rules, { replace = false } = {}) {
+    const list = replace ? [] : [...(this.state.styles || [])];
+    const out = [];
+    for (const raw of rules) {
+      const id = raw.id && list.some((r) => r.id === raw.id) ? raw.id : newId("sty");
+      const rule = { ...normalizeRule(raw, id), updatedAt: now() };
+      const at = list.findIndex((r) => r.id === id);
+      at === -1 ? list.push(rule) : (list[at] = rule);
+      out.push(rule);
+    }
+    this.state.styles = list;
+    this.save();
+    this.emit({ type: "threads" });
+    return out;
+  }
+
+  // ids: the rules to drop; no ids at all clears every rule in the workspace.
+  clearStyleRules(ids) {
+    const before = (this.state.styles || []).length;
+    this.state.styles = ids?.length ? this.state.styles.filter((r) => !ids.includes(r.id)) : [];
+    this.save();
+    this.emit({ type: "threads" });
+    return { removed: before - this.state.styles.length };
+  }
+
+  // The UI's on/off switch. Only ever flips `enabled`, so the AI's rule survives a user turning
+  // it off and back on.
+  enableStyleRule(id, enabled) {
+    const r = (this.state.styles || []).find((x) => x.id === id);
+    if (!r) throw new Error(`unknown display rule: ${id}`);
+    r.enabled = !!enabled;
+    this.save();
+    this.emit({ type: "threads" });
+    return r;
   }
 
   // ---------- rounds ----------

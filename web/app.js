@@ -1,5 +1,6 @@
 import { parseMarkdown, parsePlain } from "./markdown.js";
 import { renderTree, selectionToSource, pointToSource, caretAt, buildBackdrop } from "./view.js";
+import { rulesFor, styleRanges, styleCss, matchesScope } from "./display.js";
 import { makeAnchor, resolveAnchor, lineOf } from "./anchor.js";
 import { offsetMapper, mapRange } from "./remap.js";
 import { diffLines, diffWords, acceptHunk, revertHunk, splitLines } from "./diff.js";
@@ -37,6 +38,9 @@ const ICON = {
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>',
   reopen: '<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
+  caret: '<svg viewBox="0 0 24 24"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></svg>',
+  file: '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+  quote: '<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg>',
 };
 
 async function api(method, path, body) {
@@ -86,12 +90,15 @@ const store = {
 // ---------- state ----------
 
 const S = {
-  files: [], threads: [], tags: {}, baselines: new Set(), latex: false,
+  files: [], threads: [], tags: {}, styles: [], baselines: new Set(), latex: false,
+  stylePanelShut: store.get("stylePanelShut", false),
   aiWorking: false, agentWaiting: false, pending: 0,
   file: null, kind: "md", text: "", hash: null, baseline: null,
   mode: "read", active: null, draft: null, live: new Map(),
   dirty: false, saveTimer: null, undo: [], replyDrafts: new Map(),
   showResolved: store.get("showResolved", true),
+  collapsed: new Set(store.get("collapsedDirs:" + WS, [])),
+  wsName: "",
   chip: null,
 };
 
@@ -116,6 +123,19 @@ function rangesForRender() {
   }
   if (S.draft) out.push({ id: "draft", start: S.draft.start, end: S.draft.end, kind: "draft" });
   return out;
+}
+
+// Display-rule ranges for the open file. Running every rule over the whole text on each render
+// would be wasteful, so the result is kept until the text or the rules change.
+let styleCache = { text: null, rules: null, ranges: [] };
+
+function stylesForRender() {
+  const rules = S.file ? rulesFor(S.styles, S.file) : [];
+  if (!rules.length) return [];
+  const key = JSON.stringify(rules);
+  if (styleCache.text === S.text && styleCache.rules === key) return styleCache.ranges;
+  styleCache = { text: S.text, rules: key, ranges: styleRanges(S.text, rules) };
+  return styleCache.ranges;
 }
 
 function resolveAll(keepLive = false) {
@@ -155,9 +175,11 @@ async function refreshState() {
   S.files = st.files;
   S.threads = st.threads;
   S.tags = st.tags;
+  S.styles = st.styles || [];
   S.baselines = new Set(st.baselines);
   S.latex = st.latex;
   S.synctex = st.synctex;
+  S.wsName = st.name;
   $("wsName").textContent = st.name;
   document.title = `${st.name} · Doc Review`;
   setStatus(st);
@@ -242,29 +264,136 @@ function setStatus(st) {
 
 // ---------- sidebar ----------
 
-function renderSidebar() {
+const dirOf = (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+
+// Editable files grouped by their folder, in the order the server walked them.
+function fileGroups(files) {
+  const groups = new Map();
+  for (const f of files) {
+    const d = dirOf(f.path);
+    if (!groups.has(d)) groups.set(d, []);
+    groups.get(d).push(f);
+  }
+  return groups;
+}
+
+const allDirs = () => [...fileGroups(S.files.filter((f) => f.editable)).keys()];
+
+function setCollapsed(dirs) {
+  S.collapsed = new Set(dirs);
+  store.set("collapsedDirs:" + WS, [...S.collapsed]);
+  renderSidebar();
+}
+
+function toggleDir(d) {
+  const next = new Set(S.collapsed);
+  next.has(d) ? next.delete(d) : next.add(d);
+  setCollapsed(next);
+}
+
+// The file list is rebuilt on every refresh, which would throw the scroll back to the top. Keep
+// where the user was, and across a reload too: with a few thousand files, hunting for the open one
+// again is the whole morning.
+const sideScrollKey = `docreview:side:${WS}`;
+// Set until the first render has applied it, null afterwards.
+let sideScrollPending = Number(sessionStorage.getItem(sideScrollKey)) || null;
+
+function revealActiveFile() {
+  const list = $("fileList");
+  const on = list.querySelector(".file-item.on");
+  if (!on) return;
+  // Measured against the list's box, not offsetTop: the list is not the items' offsetParent.
+  const box = list.getBoundingClientRect();
+  const r = on.getBoundingClientRect();
+  if (r.top >= box.top && r.bottom <= box.bottom) return;
+  list.scrollTop += r.top - box.top - (box.height - r.height) / 2;
+}
+
+function renderSidebar({ reveal = false } = {}) {
   const filter = $("fileFilter").value.trim().toLowerCase();
   const list = $("fileList");
+  const keepScroll = sideScrollPending ?? list.scrollTop;
   const counts = new Map();
   for (const t of S.threads) if (t.status === "open") counts.set(t.file, (counts.get(t.file) || 0) + 1);
-  const files = S.files.filter((f) => f.editable && (!filter || f.path.toLowerCase().includes(filter)));
+  const all = S.files.filter((f) => f.editable);
+  const files = all.filter((f) => !filter || f.path.toLowerCase().includes(filter));
+  const groups = fileGroups(files);
   const kids = [];
-  let dir = null;
-  for (const f of files) {
-    const d = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "";
-    if (d !== dir) {
-      dir = d;
-      if (d) kids.push(h("div", { class: "file-dir" }, d));
+  for (const [d, items] of groups) {
+    // While filtering, show what matched; the collapsed state is for the full list.
+    const open = !!filter || !S.collapsed.has(d);
+    const comments = items.reduce((n, f) => n + (counts.get(f.path) || 0), 0);
+    const changed = items.some((f) => S.baselines.has(f.path));
+    kids.push(h("button", {
+      class: "file-dir" + (open ? " open" : ""), "aria-expanded": String(open),
+      title: `${open ? "Collapse" : "Expand"} ${d || "the workspace root"}`,
+      onclick: () => toggleDir(d),
+    },
+      h("span", { class: "caret", html: ICON.caret }),
+      h("span", { class: "dir-nm" }, d || S.wsName || "Files"),
+      !open && changed ? h("span", { class: "chg", title: "AI changes to review" }) : null,
+      comments ? h("span", { class: "badge" }, String(comments)) : null,
+      h("span", { class: "n" }, String(items.length))));
+    if (!open) continue;
+    for (const f of items) {
+      const n = counts.get(f.path);
+      kids.push(h("button", { class: "file-item" + (f.path === S.file ? " on" : ""), title: f.path, onclick: () => openFile(f.path) },
+        h("span", { class: "ext" }, f.ext.slice(1, 4)),
+        h("span", { class: "nm" }, f.path.slice(d ? d.length + 1 : 0)),
+        S.baselines.has(f.path) ? h("span", { class: "chg", title: "AI changes to review" }) : null,
+        n ? h("span", { class: "badge" }, String(n)) : null));
     }
-    const n = counts.get(f.path);
-    kids.push(h("button", { class: "file-item" + (f.path === S.file ? " on" : ""), title: f.path, onclick: () => openFile(f.path) },
-      h("span", { class: "ext" }, f.ext.slice(1, 4)),
-      h("span", { class: "nm" }, f.path.slice(d ? d.length + 1 : 0)),
-      S.baselines.has(f.path) ? h("span", { class: "chg", title: "AI changes to review" }) : null,
-      n ? h("span", { class: "badge" }, String(n)) : null));
   }
-  if (!files.length) kids.push(h("div", { class: "file-dir" }, filter ? "No match" : "No .md / .txt / .tex files"));
+  if (!files.length) kids.push(h("div", { class: "file-none" }, filter ? "No match" : "No .md / .txt / .tex files"));
   list.replaceChildren(...kids);
+  const plural = (n) => `${n} file${n === 1 ? "" : "s"}`;
+  $("fileCount").textContent = filter ? `${files.length} of ${plural(all.length)}` : plural(all.length);
+  // Before the scrolling: the rule panel takes height off the list.
+  renderStylePanel();
+  list.scrollTop = keepScroll;
+  // On the first render, and whenever the open file changes, make sure it is actually on screen.
+  if (reveal || sideScrollPending != null) revealActiveFile();
+  sideScrollPending = null;
+}
+
+// ---------- display rules ----------
+
+const ruleWhat = (r) => (r.match.literal != null ? `"${r.match.literal}"` : `/${r.match.regex}/`);
+
+function renderStylePanel() {
+  const box = $("stylePanel");
+  const mine = S.file ? S.styles.filter((r) => matchesScope(r.scope, S.file)) : [];
+  box.classList.toggle("on", mine.length > 0);
+  if (!mine.length) return void box.replaceChildren();
+  const open = !S.stylePanelShut;
+  box.replaceChildren(
+    h("button", { class: "style-head" + (open ? " open" : ""), title: open ? "Hide the rules" : "Show the rules", onclick: () => {
+      S.stylePanelShut = open;
+      store.set("stylePanelShut", S.stylePanelShut);
+      renderStylePanel();
+    } },
+      h("span", { class: "caret", html: ICON.caret }),
+      h("span", { class: "dir-nm" }, "Display rules"),
+      h("span", { class: "n" }, String(mine.length))),
+    open ? h("div", { class: "style-rules" }, mine.map((r) =>
+      h("label", { class: "style-rule", title: `${ruleWhat(r)} · ${r.scope.join(", ")}` },
+        h("input", { type: "checkbox", checked: r.enabled !== false, onchange: (e) => toggleStyleRule(r, e.target.checked) }),
+        h("span", { class: "sw", style: styleCss(r.style) || null }, "Aa"),
+        h("span", { class: "rl" }, r.label)))) : null);
+}
+
+async function toggleStyleRule(rule, enabled) {
+  rule.enabled = enabled;
+  renderView();
+  renderStylePanel();
+  try {
+    await api("PATCH", "/api/styles/" + rule.id, { enabled });
+  } catch (err) {
+    rule.enabled = !enabled;
+    renderView();
+    renderStylePanel();
+    toast(err.message);
+  }
 }
 
 // ---------- files & modes ----------
@@ -279,6 +408,8 @@ async function openFile(path) {
   S.undo = [];
   S.file = path;
   S.kind = kindOf(path);
+  // Never leave the open file hidden inside a collapsed folder.
+  if (S.collapsed.delete(dirOf(path))) store.set("collapsedDirs:" + WS, [...S.collapsed]);
   $("pdfPages").replaceChildren();
   S.pdfBoxes = new Map();
   store.set("lastFile:" + WS, path);
@@ -291,7 +422,7 @@ async function openFile(path) {
   const modes = modesFor();
   const preferred = store.get("mode:" + S.kind, modes[0]);
   setMode(modes.includes(preferred) && preferred !== "changes" ? preferred : modes[0], true);
-  renderSidebar();
+  renderSidebar({ reveal: true });
   restoreView();
 }
 
@@ -359,7 +490,7 @@ function viewEl() {
 
 function renderDoc() {
   const tree = S.kind === "md" ? parseMarkdown(S.text) : parsePlain(S.text);
-  const dom = renderTree(tree, rangesForRender(), (p) => rawUrl(relToFile(p)));
+  const dom = renderTree(tree, rangesForRender(), (p) => rawUrl(relToFile(p)), stylesForRender());
   const doc = $("doc");
   // Re-rendering replaces the text nodes; carry a live selection over to the new ones.
   const sel = window.getSelection();
@@ -385,7 +516,7 @@ function renderSource() {
 }
 
 function paintBackdrop() {
-  $("backdrop").innerHTML = buildBackdrop(S.text, rangesForRender(), S.kind === "txt" ? "txt" : S.kind);
+  $("backdrop").innerHTML = buildBackdrop(S.text, rangesForRender(), S.kind === "txt" ? "txt" : S.kind, stylesForRender());
   // Shrinking to "auto" to measure would clamp the page scroll; pin the wrapper height meanwhile.
   const wrap = $("srcWrap");
   const sc = $("scroller");
@@ -1601,6 +1732,151 @@ function toast(text, { action, onAction, ms = 4200 } = {}) {
   setTimeout(dismiss, ms);
 }
 
+// ---------- quick search (⌘K / Ctrl-K) ----------
+
+const palette = $("palette");
+let pal = null;
+let palTimer = null;
+
+function openPalette() {
+  if (palette.classList.contains("on")) return $("paletteInput").select();
+  pal = { items: [], i: 0, seq: 0 };
+  palette.classList.add("on");
+  $("paletteBackdrop").classList.add("on");
+  paletteSearch();
+  $("paletteInput").focus();
+  requestAnimationFrame(() => $("paletteInput").select());
+}
+
+function closePalette() {
+  clearTimeout(palTimer);
+  pal = null;
+  if (!palette.classList.contains("on")) return;
+  palette.classList.remove("on");
+  $("paletteBackdrop").classList.remove("on");
+}
+
+// Files whose path contains the query; a hit on the file name itself ranks above one on the folder.
+function fileHits(q) {
+  const files = S.files.filter((f) => f.editable);
+  if (!q) return files.slice(0, 12).map((f) => ({ type: "file", path: f.path }));
+  const needle = q.toLowerCase();
+  return files
+    .map((f) => ({ f, at: f.path.toLowerCase().indexOf(needle) }))
+    .filter((x) => x.at !== -1)
+    .map((x) => ({ ...x, base: x.at > x.f.path.lastIndexOf("/") }))
+    .sort((a, b) => b.base - a.base || a.at - b.at)
+    .slice(0, 12)
+    .map((x) => ({ type: "file", path: x.f.path }));
+}
+
+function paletteSearch() {
+  if (!pal) return;
+  const q = $("paletteInput").value.trim();
+  const files = fileHits(q);
+  pal.items = files;
+  pal.i = 0;
+  clearTimeout(palTimer);
+  if (q.length < 2) return renderPalette(q, "");
+  renderPalette(q, "searching the text…");
+  const seq = ++pal.seq;
+  palTimer = setTimeout(async () => {
+    let hits = [];
+    try {
+      hits = (await api("GET", "/api/search?q=" + encodeURIComponent(q))).hits;
+    } catch {
+      if (pal?.seq === seq) renderPalette(q, "text search failed");
+      return;
+    }
+    if (!pal || pal.seq !== seq) return;
+    pal.items = [...files, ...hits.map((x) => ({ ...x, type: "text" }))];
+    pal.i = Math.min(pal.i, Math.max(0, pal.items.length - 1));
+    renderPalette(q, hits.length ? `${hits.length} text hit${hits.length === 1 ? "" : "s"}` : "no text hits");
+  }, 160);
+}
+
+function renderPalette(q, hint) {
+  const list = $("paletteList");
+  $("paletteHint").textContent = hint;
+  if (!pal.items.length) {
+    list.replaceChildren(h("div", { class: "pal-none" }, q ? "Nothing matches" : "No files to open"));
+    return;
+  }
+  const kids = [];
+  let section = null;
+  pal.items.forEach((it, i) => {
+    if (it.type !== section) {
+      section = it.type;
+      kids.push(h("div", { class: "pal-head" }, section === "file" ? "Files" : "In the text"));
+    }
+    const row = h("button", {
+      class: "pal-row" + (i === pal.i ? " on" : ""), "data-i": i,
+      onclick: () => openHit(it),
+      onmousemove: () => setPalIndex(i),
+    },
+      h("span", { class: "pal-ic", html: it.type === "file" ? ICON.file : ICON.quote }),
+      it.type === "file"
+        ? h("span", { class: "pal-main" }, mark(it.path, q))
+        : h("span", { class: "pal-main" },
+            h("span", { class: "pal-snip", html: esc(it.snippet.slice(0, it.mark[0])) + "<b>" + esc(it.snippet.slice(it.mark[0], it.mark[1])) + "</b>" + esc(it.snippet.slice(it.mark[1])) }),
+            h("span", { class: "pal-where" }, `${it.path} · line ${it.line}`)));
+    kids.push(row);
+  });
+  list.replaceChildren(...kids);
+}
+
+// Query matches bolded inside a plain string.
+function mark(text, q) {
+  const at = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (at === -1) return h("span", {}, text);
+  return h("span", { html: esc(text.slice(0, at)) + "<b>" + esc(text.slice(at, at + q.length)) + "</b>" + esc(text.slice(at + q.length)) });
+}
+
+function setPalIndex(i) {
+  if (!pal || !pal.items.length) return;
+  pal.i = (i + pal.items.length) % pal.items.length;
+  const list = $("paletteList");
+  for (const r of list.querySelectorAll(".pal-row")) r.classList.toggle("on", Number(r.dataset.i) === pal.i);
+  list.querySelector(".pal-row.on")?.scrollIntoView({ block: "nearest" });
+}
+
+function paletteKeydown(e) {
+  if (!pal) return;
+  if (e.key === "Escape") return e.preventDefault(), closePalette();
+  if (e.key === "ArrowDown") return e.preventDefault(), setPalIndex(pal.i + 1);
+  if (e.key === "ArrowUp") return e.preventDefault(), setPalIndex(pal.i - 1);
+  if (e.key === "Enter") {
+    e.preventDefault();
+    const it = pal.items[pal.i];
+    if (it) openHit(it);
+  }
+}
+
+async function openHit(it) {
+  closePalette();
+  if (it.path !== S.file) await openFile(it.path);
+  if (it.type === "text") revealOffset(it.start, it.end);
+}
+
+// Scroll a source range into view and select it, in whichever mode can show it.
+function revealOffset(start, end) {
+  const a = Math.min(start, S.text.length);
+  const b = Math.min(end, S.text.length);
+  const sc = $("scroller");
+  if (S.mode === "read") {
+    const r = selectSource(a, b);
+    if (r) return void sc.scrollBy({ top: r.getBoundingClientRect().top - sc.getBoundingClientRect().top - 160 });
+  }
+  if (S.mode !== "edit") {
+    if (!modesFor().includes("edit")) return;
+    setMode("edit");
+  }
+  src.focus();
+  src.setSelectionRange(a, b);
+  const r = backdropRect(a);
+  sc.scrollBy({ top: r.top - sc.getBoundingClientRect().top - 180 });
+}
+
 // ---------- wiring ----------
 
 function wire() {
@@ -1611,7 +1887,21 @@ function wire() {
     store.set("sidebarHidden", hidden);
     setTimeout(layoutCards, 320);
   });
-  $("fileFilter").addEventListener("input", renderSidebar);
+  $("fileFilter").addEventListener("input", () => renderSidebar());
+  let sideScrollTimer = null;
+  $("fileList").addEventListener("scroll", () => {
+    clearTimeout(sideScrollTimer);
+    sideScrollTimer = setTimeout(() => {
+      try {
+        sessionStorage.setItem(sideScrollKey, String($("fileList").scrollTop));
+      } catch {}
+    }, 150);
+  }, { passive: true });
+  $("collapseAll").addEventListener("click", () => setCollapsed(allDirs()));
+  $("expandAll").addEventListener("click", () => setCollapsed([]));
+  $("paletteBackdrop").addEventListener("click", () => closePalette());
+  $("paletteInput").addEventListener("input", paletteSearch);
+  $("paletteInput").addEventListener("keydown", paletteKeydown);
   $("showResolved").addEventListener("change", (e) => {
     S.showResolved = e.target.checked;
     store.set("showResolved", S.showResolved);
@@ -1626,7 +1916,13 @@ function wire() {
   new ResizeObserver(() => layoutCards()).observe($("docCol"));
 
   document.addEventListener("keydown", (e) => {
+    // Quick search everywhere but inside a textarea, where ⌘K still inserts a link.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k" && e.target.tagName !== "TEXTAREA") {
+      e.preventDefault();
+      return openPalette();
+    }
     if (e.key === "Escape") {
+      if (palette.classList.contains("on")) return closePalette();
       if (modal.classList.contains("on")) return closeModal();
       if (S.draft) return cancelDraft();
       if (S.chip) return hideChip();

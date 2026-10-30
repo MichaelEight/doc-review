@@ -12,7 +12,7 @@ diff and accept or revert each one.
 - **UI** (`web/`): vanilla JS. Markdown is rendered with source positions so comments anchor to
   exact text. KaTeX for math loads from jsDelivr; without it, math shows as source.
 - **Skill** (`.claude/skills/doc-review/SKILL.md`): the review loop for the agent.
-- **Data**: `<workspace>/.doc-review/comments.json` (threads, rounds, tags) and
+- **Data**: `<workspace>/.doc-review/comments.json` (threads, rounds, tags, display rules) and
   `baselines.json` (what the diff compares against). Add `.doc-review/` to the workspace's
   `.gitignore` unless you want to keep the review history.
 - **Token**: the UI link carries a secret kept in `~/.config/doc-review/token` (mode 600;
@@ -44,6 +44,8 @@ node src/server.js --serve ~/path/to/folder
 
 | Action | How |
 |---|---|
+| Quick search | ⌘K / Ctrl-K: type to jump to a file by path, or to find a phrase anywhere in the folder. ↑ ↓ to move, ↵ to open, Esc to close. Opening a text hit jumps to that spot and selects it. |
+| Browse files | The sidebar groups files by folder. Click a folder header to fold it; the header shows how many files it holds, plus open comments and a dot for pending AI changes while it is folded. The ⌃⌄ buttons above the list fold or unfold everything, and the state is remembered per folder. |
 | Comment on text | Select it, click **Comment** in the margin (or ⌘⌥M) |
 | Comment at a spot | Click anywhere in the page, then **+** |
 | Reply / answer the AI | Click the card, type, ⌘↵ |
@@ -51,7 +53,7 @@ node src/server.js --serve ~/path/to/folder
 | @file, #tag | Type `@` or `#` in a comment to autocomplete |
 | Commands | Start a comment with `/` (see below) |
 | Send | **Send to AI** (⌘⇧↵) |
-| Formatting | ⌘B bold, ⌘I italic, ⌘U underline, ⌘⇧X strikethrough, ⌘E code, ⌘K link, ⌘⌥1–3 headings, ⌘⇧8 / ⌘⇧7 lists, Tab / ⇧Tab indent. These work in Edit, and on a selection in Read. Markdown and LaTeX markup as appropriate. |
+| Formatting | ⌘B bold, ⌘I italic, ⌘U underline, ⌘⇧X strikethrough, ⌘E code, ⌘⌥1–3 headings, ⌘⇧8 / ⌘⇧7 lists, Tab / ⇧Tab indent. These work in Edit, and on a selection in Read. ⌘K inserts a link inside the source editor only, since everywhere else it opens quick search. Markdown and LaTeX markup as appropriate. |
 | Review AI edits | **Changes** tab: hover a change for Accept / Revert, or Accept all / Revert all |
 | LaTeX | **Source** to edit and comment; **PDF** to compile, preview and comment right on the rendered page (select text or click a spot) |
 
@@ -76,10 +78,34 @@ the spot; add `all` (for `/fix`) to cover the whole file.
 | `/check [what]` | Fact-checks; replies with a verdict and sources |
 | `/define [term]` | Proposes a footnote or glossary entry, adds it once you agree |
 | `/consistency [@file]` | Makes terms, spelling and tense consistent, optionally against another file |
+| `/style <how>` | Sets up colouring for the view: a nick, a pattern, a kind of line (see below) |
 | `/graph [what]` | Plots the data with matplotlib into `figures/` and inserts the image |
 
 Editing is locked while the AI is working (comments still work) and while there are AI changes
 waiting for review. This keeps your edits from mixing into the AI's diff.
+
+### Display rules
+
+Colouring that changes how a file looks, never what it holds. You ask for it in a comment, in
+plain words: *"colour this nick blue"*, *"grey out everything in `<>`"*, *"dim the timestamps in
+the whole logs folder"*. The AI turns that into rules with `review_style`; the document on disk
+is untouched.
+
+A rule is a scope, a match and a style:
+
+| Part | What |
+|---|---|
+| `scope` | Workspace-relative globs. `["notes.md"]` one file, `["logs/*.txt"]` a folder, `["chats/**"]` a tree, `["**"]` everything (the default). `*` stays inside one path segment, `**` crosses folders. |
+| `match` | A `literal` (with `ignoreCase`, `wholeWord`) or a `regex` (with `flags` of `i`/`m`/`s` and an optional capture `group` to paint only part of the match). |
+| `style` | `color`, `bg`, `bold`, `italic`, `underline`, `strike`, `dim`. Colours are plain CSS colours and nothing else. |
+
+Rules show up in a **Display rules** panel at the bottom of the sidebar, listing the ones that
+apply to the open file with a preview of each. The checkbox switches a rule off without deleting
+it, so you can ask for a colouring, try it, and turn it off again. They apply in both Read and
+Source, and overlapping rules stack with the later one winning.
+
+They live in `.doc-review/comments.json` alongside the comment threads, so they persist and are
+shared between the UI and the agent. They are per workspace, not per user.
 
 ## Tools
 
@@ -92,6 +118,7 @@ waiting for review. This keeps your edits from mixing into the AI's diff.
 | `review_comment` | AI starts a thread on an exact quote. |
 | `review_finish` | End the round with a summary; the UI unlocks and shows the diff. |
 | `review_threads` | List threads with current positions. |
+| `review_style` | Set, list or clear display rules: colouring for how files are shown. |
 | `review_define_tag` | Define a `#tag` for the workspace. |
 
 ## How anchoring works

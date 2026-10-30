@@ -91,14 +91,16 @@ export class ReviewHttp {
     const body = ["POST", "PUT", "PATCH"].includes(req.method) ? await readJson(req) : {};
     const q = (k) => url.searchParams.get(k);
     const tm = url.pathname.match(/^\/api\/threads\/([\w]+)(?:\/messages\/?([\w]*))?$/);
+    const sm = url.pathname.match(/^\/api\/styles\/([\w]+)$/);
 
     if (route === "GET /api/state") {
       return send(res, 200, {
         id: ws.id, root: ws.root, name: ws.name, files: ws.listFiles(), threads: ws.state.threads, tags: ws.state.tags,
-        baselines: Object.keys(ws.baselines), latex: latexAvailable(), synctex: synctexAvailable(), ...ws.status(),
+        styles: ws.styleRules(), baselines: Object.keys(ws.baselines), latex: latexAvailable(), synctex: synctexAvailable(), ...ws.status(),
       });
     }
     if (route === "GET /api/events") return this.events(ws, req, res);
+    if (route === "GET /api/search") return send(res, 200, { hits: ws.searchText(q("q")) });
     if (route === "GET /api/file") return send(res, 200, ws.readFile(q("path")));
     if (route === "PUT /api/file") return send(res, 200, ws.writeFile(body.path, String(body.text ?? ""), body.baseHash));
     if (route === "GET /api/raw") {
@@ -113,6 +115,7 @@ export class ReviewHttp {
     if (tm && tm[2] && req.method === "DELETE") return send(res, 200, (ws.deleteMessage(tm[1], tm[2]), { ok: true }));
     if (tm && !url.pathname.includes("/messages") && req.method === "PATCH") return send(res, 200, ws.setStatus(tm[1], body.status));
     if (tm && !url.pathname.includes("/messages") && req.method === "DELETE") return send(res, 200, (ws.deleteThread(tm[1]), { ok: true }));
+    if (sm && req.method === "PATCH") return send(res, 200, ws.enableStyleRule(sm[1], body.enabled));
     if (route === "POST /api/submit") return send(res, 200, ws.submit());
     if (route === "POST /api/latex") {
       const out = await compileLatex(ws, body.path);

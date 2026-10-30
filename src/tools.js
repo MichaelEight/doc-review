@@ -101,6 +101,71 @@ export const TOOLS = [
     },
   },
   {
+    name: "review_style",
+    description:
+      "Set, list or clear display rules: colouring that changes how files are SHOWN in the UI and never touches what they " +
+      "contain. A rule matches a literal or a regular expression and paints it (colour, background, bold, italic, underline, " +
+      "strike, dim) in the files its scope globs select. Use it when the user asks for something like \"colour this nick blue\", " +
+      "\"give the text in <> a grey background\" or \"dim the timestamps\" in a comment. Rules are per workspace and persist.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        root: rootProp,
+        op: { type: "string", enum: ["set", "list", "clear"], description: "Default set." },
+        replace: { type: "boolean", description: "set: drop every existing rule first (default false, which adds and updates)." },
+        ids: { type: "array", items: { type: "string" }, description: "clear: the rules to remove. Omit to remove all of them." },
+        file: { type: "string", description: "list: show only the rules that apply to this file." },
+        rules: {
+          type: "array",
+          description: "set: the rules to add or update.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["match", "style"],
+            properties: {
+              id: { type: "string", description: "Update an existing rule instead of adding one." },
+              label: { type: "string", description: "Short name shown in the UI's rule list, e.g. \"nick: xxSLAYERCATxx\"." },
+              scope: {
+                type: "array",
+                items: { type: "string" },
+                description: "Workspace-relative globs the rule applies to: [\"logs/*.txt\"], [\"chats/**\"], [\"notes.md\"]. " +
+                  "Default [\"**\"] (every file). * stays inside one path segment, ** crosses folders.",
+              },
+              match: {
+                type: "object",
+                additionalProperties: false,
+                description: "Exactly one of literal or regex.",
+                properties: {
+                  literal: { type: "string", description: "Plain text to match, e.g. a nick." },
+                  ignoreCase: { type: "boolean", description: "literal: default true." },
+                  wholeWord: { type: "boolean", description: "literal: match only whole words." },
+                  regex: { type: "string", description: "JavaScript regular expression, e.g. \"<[^>]+>\" or \"^\\\\d{4}-\\\\d{2}-\\\\d{2}\"." },
+                  flags: { type: "string", description: "regex: any of i, m, s (g is always on)." },
+                  group: { type: "number", description: "regex: paint this capture group instead of the whole match." },
+                },
+              },
+              style: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  color: { type: "string", description: "CSS colour, e.g. #e0a800 or rebeccapurple." },
+                  bg: { type: "string", description: "CSS background colour. Prefer a translucent one, e.g. rgba(14,165,233,.18), so both themes stay readable." },
+                  bold: { type: "boolean" },
+                  italic: { type: "boolean" },
+                  underline: { type: "boolean" },
+                  strike: { type: "boolean" },
+                  dim: { type: "boolean", description: "Fade the text, for noise like timestamps." },
+                },
+              },
+              enabled: { type: "boolean", description: "Default true. The user can also switch a rule off in the UI." },
+            },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "review_define_tag",
     description:
       "Define or update a #tag for this workspace (a concept, topic or convention, e.g. #image-gs = \"Gaussian splatting figures, " +
@@ -201,6 +266,15 @@ export function makeHandlers(registry, http) {
       return ws.state.threads
         .filter((t) => (!file || t.file === fileRel(ws, file)) && (!status || t.status === status))
         .map((t) => ws.describeThread(t));
+    },
+
+    review_style({ root, op = "set", rules, replace = false, ids, file }) {
+      const ws = pick(root);
+      if (op === "list") return { rules: ws.styleRules(file ? fileRel(ws, file) : null) };
+      if (op === "clear") return ws.clearStyleRules(ids);
+      if (!rules?.length) throw new Error("set needs rules (or use op=list / op=clear)");
+      const saved = ws.setStyleRules(rules, { replace });
+      return { ok: true, rules: saved, total: ws.styleRules().length };
     },
 
     review_define_tag({ root, name, description, files }) {
