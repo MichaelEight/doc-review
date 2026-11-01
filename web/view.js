@@ -118,6 +118,13 @@ function build(node, ctx) {
     if (node.title) dom.title = node.title;
     dom.dataset.atom = "1";
     dom.loading = "lazy";
+  } else if (tag === "br" && document.documentElement.dataset.reflow === "1") {
+    // Reflow: the newline keeps its one source offset, so anchors still line up, but it reads
+    // as a space instead of breaking the line.
+    dom = document.createElement("span");
+    dom.className = "seg sbr";
+    dom.dataset.s = node.s;
+    dom.textContent = " ";
   } else if (tag === "root") {
     dom = document.createDocumentFragment();
     for (const c of node.children) dom.append(build(c, ctx));

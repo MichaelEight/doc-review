@@ -36,6 +36,11 @@
 
   --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
   --read: "Iowan Old Style", "Charter", "Source Serif Pro", Georgia, serif;
+  --read-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --read-face: var(--read);
+  --read-size: 17.5px;
+  --read-lh: 1.7;
+  --col-w: 780px;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --r: 12px;
@@ -404,7 +409,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   padding: 40px 28px 40vh;
   min-height: 100%;
 }
-.doc-col { width: min(780px, 100%); flex: none; position: relative; }
+.doc-col { width: min(var(--col-w), 100%); flex: none; position: relative; }
 .margin { width: var(--margin-w); flex: none; position: relative; }
 body.mode-changes .margin { display: none; }
 body.mode-pdf .doc-col { width: min(860px, 100%); }
@@ -427,7 +432,7 @@ body.no-file .empty { display: block; }
 
 .doc {
   padding: 56px 68px 72px;
-  font: 17.5px/1.7 var(--read);
+  font: var(--read-size)/var(--read-lh) var(--read-face);
   color: var(--ink);
   cursor: text;
   overflow-wrap: break-word;
@@ -993,3 +998,45 @@ img.hl-ai, .math.hl-ai { outline-color: var(--hl-ai-line); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001s !important; transition-duration: 0.001s !important; }
 }
+
+
+/* ---------- reading settings popover ---------- */
+
+.reading {
+  position: absolute;
+  top: calc(var(--top) - 6px);
+  right: 16px;
+  width: 268px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  box-shadow: var(--shadow-3);
+  padding: 14px;
+  display: none;
+  z-index: 60;
+}
+.reading.open { display: block; }
+.reading h4 { margin: 0 0 8px; font: 600 11.5px/1 var(--ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.reading section { margin-bottom: 14px; }
+.reading section:last-of-type { margin-bottom: 0; }
+.read-row { display: flex; gap: 6px; }
+.read-opt {
+  flex: 1;
+  padding: 7px 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.read-opt:hover { background: var(--hover); }
+.read-opt.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.read-opt.serif { font-family: var(--read); }
+.read-opt.sans { font-family: var(--read-sans); }
+.read-opt.mono { font-family: var(--mono); font-size: 12px; }
+.read-size { display: flex; align-items: center; gap: 8px; }
+.read-size .val { flex: 1; text-align: center; font: 600 13px var(--mono); color: var(--ink-2); }
+.read-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.read-hint { margin: 6px 0 0; font-size: 11.5px; line-height: 1.4; color: var(--muted); }

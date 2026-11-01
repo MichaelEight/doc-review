@@ -2146,6 +2146,41 @@ function revealOffset(start, end) {
   sc.scrollBy({ top: r.top - sc.getBoundingClientRect().top - 180, behavior: "instant" });
 }
 
+// ---------- reading settings ----------
+
+const FACES = { serif: "var(--read)", sans: "var(--read-sans)", mono: "var(--mono)" };
+
+const R = {
+  face: store.get("readFace", "serif"),
+  size: store.get("readSize", 17.5),
+  width: store.get("readWidth", 780),
+  reflow: store.get("readReflow", true),
+};
+
+function applyReading() {
+  const root = document.documentElement;
+  root.style.setProperty("--read-face", FACES[R.face] || FACES.serif);
+  root.style.setProperty("--read-size", R.size + "px");
+  root.style.setProperty("--read-lh", R.face === "mono" ? "1.62" : "1.7");
+  root.style.setProperty("--col-w", R.width + "px");
+  root.dataset.reflow = R.reflow ? "1" : "0";
+  for (const b of document.querySelectorAll("#reading [data-face]")) b.classList.toggle("on", b.dataset.face === R.face);
+  for (const b of document.querySelectorAll("#reading [data-width]")) b.classList.toggle("on", Number(b.dataset.width) === R.width);
+  $("readSizeVal").textContent = String(R.size);
+  $("readReflow").checked = R.reflow;
+}
+
+function setReading(patch) {
+  Object.assign(R, patch);
+  store.set("readFace", R.face);
+  store.set("readSize", R.size);
+  store.set("readWidth", R.width);
+  store.set("readReflow", R.reflow);
+  applyReading();
+  renderView();
+  setTimeout(layoutCards, 0);
+}
+
 // ---------- wiring ----------
 
 function wire() {
@@ -2168,6 +2203,22 @@ function wire() {
   }, { passive: true });
   $("fileName").addEventListener("click", toggleOutline);
   $("openRecipes").addEventListener("click", openRecipes);
+  $("readingBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("reading").classList.toggle("open");
+  });
+  $("reading").addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => $("reading").classList.remove("open"));
+  for (const b of document.querySelectorAll("#reading [data-face]")) {
+    b.addEventListener("click", () => setReading({ face: b.dataset.face }));
+  }
+  for (const b of document.querySelectorAll("#reading [data-width]")) {
+    b.addEventListener("click", () => setReading({ width: Number(b.dataset.width) }));
+  }
+  $("readSmaller").addEventListener("click", () => setReading({ size: Math.max(13, R.size - 1) }));
+  $("readBigger").addEventListener("click", () => setReading({ size: Math.min(26, R.size + 1) }));
+  $("readReflow").addEventListener("change", (e) => setReading({ reflow: e.target.checked }));
+  applyReading();
   $("recBackdrop").addEventListener("click", () => closeRecipes());
   $("collapseAll").addEventListener("click", () => setCollapsed(allDirs()));
   $("expandAll").addEventListener("click", () => setCollapsed([]));

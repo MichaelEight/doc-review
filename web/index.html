@@ -22,6 +22,9 @@
     </div>
     <div class="modes" id="modes" role="tablist"></div>
     <div class="top-right">
+      <button class="icon-btn" id="readingBtn" title="Reading settings: font, size, width">
+        <svg viewBox="0 0 24 24"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></svg>
+      </button>
       <span class="agent-pill" id="agentPill"><i></i><span></span></span>
       <button class="btn primary big" id="sendBtn" disabled title="Send comments to the AI (⌘⇧↵)">
         <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
@@ -30,6 +33,37 @@
       </button>
     </div>
   </header>
+  <div class="reading" id="reading" role="dialog" aria-label="Reading settings">
+    <section>
+      <h4>Font</h4>
+      <div class="read-row">
+        <button class="read-opt serif" data-face="serif">Serif</button>
+        <button class="read-opt sans" data-face="sans">Sans</button>
+        <button class="read-opt mono" data-face="mono">Mono</button>
+      </div>
+    </section>
+    <section>
+      <h4>Size</h4>
+      <div class="read-size">
+        <button class="read-opt" id="readSmaller" title="Smaller">A-</button>
+        <span class="val" id="readSizeVal">17.5</span>
+        <button class="read-opt" id="readBigger" title="Bigger">A+</button>
+      </div>
+    </section>
+    <section>
+      <h4>Column</h4>
+      <div class="read-row">
+        <button class="read-opt" data-width="640">Narrow</button>
+        <button class="read-opt" data-width="780">Normal</button>
+        <button class="read-opt" data-width="960">Wide</button>
+      </div>
+    </section>
+    <section>
+      <h4>Paragraphs</h4>
+      <label class="read-check"><input type="checkbox" id="readReflow"> Reflow wrapped lines</label>
+      <p class="read-hint">On: a line break inside a paragraph reads as a space, so hard-wrapped files flow. Off: every break is shown, which suits poems and addresses.</p>
+    </section>
+  </div>
   <div class="work-banner" id="workBanner"><span class="shimmer"></span><span id="workText">AI is working on your comments. Editing is paused.</span></div>
 
   <div class="body">
