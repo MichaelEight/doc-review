@@ -366,6 +366,94 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .file-item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-item .badge { font-size: 11.5px; font-weight: 600; background: var(--hl-user-on); color: var(--ink); border-radius: 99px; padding: 1px 7px; }
 .file-item .chg { width: 7px; height: 7px; border-radius: 50%; background: var(--hl-ai-line); }
+.file-item .nm-dir, .tab .nm-dir { color: var(--muted); font-weight: 400; }
+.file-item.tabbed:not(.on) .nm { color: var(--ink); }
+
+/* Pin / favourite / more: hidden until hover, but a set pin or star stays visible. */
+.file-item .fas { display: flex; gap: 1px; margin-right: -4px; }
+.file-item .fa { display: none; width: 22px; height: 22px; border-radius: 6px; align-items: center; justify-content: center; color: var(--muted); }
+.file-item .fa svg { width: 14px; height: 14px; }
+.file-item .fa:hover { background: var(--hover); color: var(--ink); }
+.file-item:hover .fa, .file-item:focus-visible .fa, .file-item .fa.set { display: flex; }
+.file-item .fa.set svg { fill: currentColor; }
+.file-item .fa.set:nth-child(1) { color: var(--mk-red); }
+.file-item .fa.set:nth-child(2) { color: var(--accent); }
+/* Under "Pinned" the pin says nothing new; it shows on hover only, to unpin. */
+.file-item.pinned:not(:hover) .fa:nth-child(2) { display: none; }
+.file-dir.pinned-head { cursor: default; }
+.file-dir.pinned-head:hover { background: transparent; color: var(--muted); }
+.side-tool-btns .icon-btn.on { color: var(--mk-red); background: var(--hover); }
+.side-tool-btns .icon-btn.on svg { fill: currentColor; }
+
+/* Colour marks: a tinted row with a coloured bar on its left edge. */
+:root {
+  --mk-yellow: #e0a800;
+  --mk-green: #1f9d6a;
+  --mk-blue: #2b7de9;
+  --mk-red: #d13b3b;
+  --mk-purple: #8b5cf6;
+}
+.mk-yellow { --mk: var(--mk-yellow); }
+.mk-green { --mk: var(--mk-green); }
+.mk-blue { --mk: var(--mk-blue); }
+.mk-red { --mk: var(--mk-red); }
+.mk-purple { --mk: var(--mk-purple); }
+.file-item[class*="mk-"] { background: color-mix(in srgb, var(--mk) 13%, transparent); box-shadow: inset 3px 0 0 var(--mk); }
+.file-item[class*="mk-"]:hover { background: color-mix(in srgb, var(--mk) 20%, transparent); }
+.file-item[class*="mk-"].on { background: color-mix(in srgb, var(--mk) 22%, var(--accent-soft)); }
+
+/* ---------- file menu ---------- */
+
+.ctx {
+  position: fixed;
+  z-index: 60;
+  min-width: 210px;
+  padding: 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  box-shadow: var(--shadow-3);
+  display: none;
+}
+.ctx.on { display: block; animation: pop 0.14s var(--ease); }
+@keyframes pop { from { opacity: 0; transform: scale(0.97); } }
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  padding: 7px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ctx-item:hover, .ctx-item:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.ctx-ic { display: flex; color: var(--muted); }
+.ctx-ic svg { width: 16px; height: 16px; }
+.ctx-sep { height: 1px; background: var(--line); margin: 5px 4px; }
+.ctx-label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 4px 9px 2px; }
+.ctx-marks { display: flex; gap: 8px; padding: 6px 9px 4px; }
+.ctx-marks .sw {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--mk);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s var(--ease);
+}
+.ctx-marks .sw:hover { transform: scale(1.12); }
+.ctx-marks .sw.on { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--mk); }
+.ctx-marks .sw.none { background: var(--hover); color: var(--muted); }
+.ctx-marks .sw.none svg { width: 13px; height: 13px; }
 .style-panel { display: none; border-top: 1px solid var(--line); flex: none; max-height: 42%; overflow: auto; }
 .style-panel.on { display: block; }
 .style-head {
@@ -400,7 +488,55 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .style-rule:has(input:not(:checked)) .sw { opacity: 0.35; }
 .side-toggle { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; cursor: pointer; }
 
+.main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .scroller { flex: 1; overflow: auto; position: relative; scroll-behavior: smooth; }
+
+/* ---------- tabs ---------- */
+
+.tabs {
+  display: none;
+  flex: none;
+  gap: 2px;
+  padding: 6px 10px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 55%, var(--bg));
+}
+.tabs::-webkit-scrollbar { display: none; }
+body.has-tabs .tabs { display: flex; }
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  max-width: 220px;
+  padding: 7px 6px 8px 12px;
+  border-radius: 9px 9px 0 0;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  margin-bottom: -1px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  transition: background 0.15s, color 0.15s;
+}
+.tab:hover { background: var(--hover); color: var(--ink-2); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tab.on { background: var(--paper); border-color: var(--line); color: var(--ink); font-weight: 600; }
+.tab.on::before { content: ""; position: absolute; left: 10px; right: 10px; top: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+.tab[class*="mk-"]::after { content: ""; position: absolute; left: 4px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--mk); }
+.tab-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-fav { display: flex; color: var(--mk-red); }
+.tab-fav svg { width: 13px; height: 13px; fill: currentColor; }
+.tab .badge { font-size: 11px; font-weight: 600; background: var(--hl-user-on); color: var(--ink); border-radius: 99px; padding: 1px 6px; }
+.tab .chg { width: 7px; height: 7px; border-radius: 50%; background: var(--hl-ai-line); flex: none; }
+.tab-x { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; color: var(--muted); opacity: 0; }
+.tab-x svg { width: 13px; height: 13px; }
+.tab:hover .tab-x, .tab.on .tab-x, .tab:focus-visible .tab-x { opacity: 1; }
+.tab-x:hover { background: var(--hover); color: var(--ink); }
 .page {
   position: relative;
   display: flex;

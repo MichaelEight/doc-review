@@ -46,6 +46,10 @@ const ICON = {
   caret: '<svg viewBox="0 0 24 24"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></svg>',
   file: '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
   quote: '<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg>',
+  heart: '<svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>',
+  pin: '<svg viewBox="0 0 24 24"><path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/></svg>',
+  dots: '<svg viewBox="0 0 24 24"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="3"/></svg>',
+  tab: '<svg viewBox="0 0 24 24"><path d="M3 8h18v11H3zM3 8V5h7l2 3"/></svg>',
 };
 
 async function api(method, path, body) {
@@ -103,6 +107,11 @@ const S = {
   dirty: false, saveTimer: null, undo: [], replyDrafts: new Map(),
   showResolved: store.get("showResolved", true),
   collapsed: new Set(store.get("collapsedDirs:" + WS, [])),
+  // Open tabs, in strip order, and per-file pin / favourite / colour mark. Both live in this
+  // browser only: they are how one reviewer finds their way around, not part of the review.
+  tabs: store.get("tabs:" + WS, []),
+  flags: store.get("fileFlags:" + WS, {}),
+  favOnly: store.get("favOnly:" + WS, false),
   wsName: "",
   chip: null,
 };
@@ -167,7 +176,7 @@ async function boot() {
   $("showResolved").checked = S.showResolved;
   await refreshState();
   connectEvents();
-  const want = qs.get("file") || store.get("lastFile:" + WS, null);
+  const want = qs.get("file") || store.get("lastFile:" + WS, null) || S.tabs[0];
   const first = S.files.find((f) => f.path === want && f.editable) || S.files.find((f) => f.editable && /readme/i.test(f.path)) || S.files.find((f) => f.editable);
   if (first) await openFile(first.path);
   wire();
@@ -189,6 +198,7 @@ async function refreshState() {
   document.title = `${st.name} · Doc Review`;
   setStatus(st);
   renderSidebar();
+  renderTabs();
 }
 
 let refreshTimer = null;
@@ -314,6 +324,49 @@ function revealActiveFile() {
   list.scrollTop += r.top - box.top - (box.height - r.height) / 2;
 }
 
+// Colour marks, in menu order. The name is the CSS class suffix.
+const MARKS = ["yellow", "green", "blue", "red", "purple"];
+const flagOf = (p) => S.flags[p] || {};
+
+function setFlag(path, key, value) {
+  const f = { ...flagOf(path), [key]: value };
+  if (!value) delete f[key];
+  if (Object.keys(f).length) S.flags[path] = f;
+  else delete S.flags[path];
+  store.set("fileFlags:" + WS, S.flags);
+  renderSidebar();
+  renderTabs();
+}
+
+// A small icon toggle inside a file row. The row is a button itself, so these are spans that stop
+// the click from opening the file.
+function rowAction(icon, title, on, run) {
+  return h("span", {
+    class: "fa" + (on ? " set" : ""), role: "button", title, html: icon,
+    onclick: (e) => (e.stopPropagation(), run()),
+  });
+}
+
+function fileRow(f, label, counts) {
+  const n = counts.get(f.path);
+  const fl = flagOf(f.path);
+  return h("button", {
+    class: "file-item" + (f.path === S.file ? " on" : "") + (S.tabs.includes(f.path) ? " tabbed" : "") + (fl.mark ? " mk-" + fl.mark : "") + (fl.pin ? " pinned" : ""),
+    title: f.path + "\nRight-click for pin, favourite and colour",
+    "data-path": f.path,
+    onclick: () => openFile(f.path),
+    oncontextmenu: (e) => (e.preventDefault(), fileMenu(f.path, e)),
+  },
+    h("span", { class: "ext" }, f.ext.slice(1, 4)),
+    label,
+    S.baselines.has(f.path) ? h("span", { class: "chg", title: "AI changes to review" }) : null,
+    n ? h("span", { class: "badge" }, String(n)) : null,
+    h("span", { class: "fas" },
+      rowAction(ICON.heart, fl.fav ? "Remove from favourites" : "Add to favourites", fl.fav, () => setFlag(f.path, "fav", !fl.fav)),
+      rowAction(ICON.pin, fl.pin ? "Unpin" : "Pin to the top", fl.pin, () => setFlag(f.path, "pin", !fl.pin)),
+      rowAction(ICON.dots, "More: colour mark, open in a tab", false, () => fileMenu(f.path))));
+}
+
 function renderSidebar({ reveal = false } = {}) {
   const filter = $("fileFilter").value.trim().toLowerCase();
   const list = $("fileList");
@@ -321,12 +374,22 @@ function renderSidebar({ reveal = false } = {}) {
   const counts = new Map();
   for (const t of S.threads) if (t.status === "open") counts.set(t.file, (counts.get(t.file) || 0) + 1);
   const all = S.files.filter((f) => f.editable);
-  const files = all.filter((f) => !filter || f.path.toLowerCase().includes(filter));
-  const groups = fileGroups(files);
+  const files = all.filter((f) => (!filter || f.path.toLowerCase().includes(filter)) && (!S.favOnly || flagOf(f.path).fav));
+  const nm = (p, d) => h("span", { class: "nm" }, p.slice(d ? d.length + 1 : 0));
   const kids = [];
+  // Pinned files leave their folder and sit above every folder, whatever is collapsed.
+  const pinned = files.filter((f) => flagOf(f.path).pin);
+  if (pinned.length) {
+    kids.push(h("div", { class: "file-dir pinned-head" }, h("span", { class: "caret", html: ICON.pin }), h("span", { class: "dir-nm" }, "Pinned"), h("span", { class: "n" }, String(pinned.length))));
+    for (const f of pinned) {
+      const d = dirOf(f.path);
+      kids.push(fileRow(f, h("span", { class: "nm" }, d ? h("span", { class: "nm-dir" }, d + "/") : null, f.path.slice(d ? d.length + 1 : 0)), counts));
+    }
+  }
+  const groups = fileGroups(files.filter((f) => !flagOf(f.path).pin));
   for (const [d, items] of groups) {
     // While filtering, show what matched; the collapsed state is for the full list.
-    const open = !!filter || !S.collapsed.has(d);
+    const open = !!filter || S.favOnly || !S.collapsed.has(d);
     const comments = items.reduce((n, f) => n + (counts.get(f.path) || 0), 0);
     const changed = items.some((f) => S.baselines.has(f.path));
     kids.push(h("button", {
@@ -340,25 +403,155 @@ function renderSidebar({ reveal = false } = {}) {
       comments ? h("span", { class: "badge" }, String(comments)) : null,
       h("span", { class: "n" }, String(items.length))));
     if (!open) continue;
-    for (const f of items) {
-      const n = counts.get(f.path);
-      kids.push(h("button", { class: "file-item" + (f.path === S.file ? " on" : ""), title: f.path, onclick: () => openFile(f.path) },
-        h("span", { class: "ext" }, f.ext.slice(1, 4)),
-        h("span", { class: "nm" }, f.path.slice(d ? d.length + 1 : 0)),
-        S.baselines.has(f.path) ? h("span", { class: "chg", title: "AI changes to review" }) : null,
-        n ? h("span", { class: "badge" }, String(n)) : null));
-    }
+    for (const f of items) kids.push(fileRow(f, nm(f.path, d), counts));
   }
-  if (!files.length) kids.push(h("div", { class: "file-none" }, filter ? "No match" : "No .md / .txt / .tex files"));
+  if (!files.length) kids.push(h("div", { class: "file-none" }, S.favOnly ? "No favourites yet. Use the heart on a file to add it." : filter ? "No match" : "No .md / .txt / .tex files"));
   list.replaceChildren(...kids);
   const plural = (n) => `${n} file${n === 1 ? "" : "s"}`;
-  $("fileCount").textContent = filter ? `${files.length} of ${plural(all.length)}` : plural(all.length);
+  $("fileCount").textContent = filter || S.favOnly ? `${files.length} of ${plural(all.length)}` : plural(all.length);
+  $("favOnly").classList.toggle("on", S.favOnly);
+  $("favOnly").setAttribute("aria-pressed", String(S.favOnly));
   // Before the scrolling: the rule panel takes height off the list.
   renderStylePanel();
   list.scrollTop = keepScroll;
   // On the first render, and whenever the open file changes, make sure it is actually on screen.
   if (reveal || sideScrollPending != null) revealActiveFile();
   sideScrollPending = null;
+}
+
+// ---------- file menu ----------
+
+const ctx = $("ctx");
+
+// Right-click (or the ⋯ button) on a file: pin, favourite, colour mark, tabs. Without a mouse event
+// the menu opens under the row.
+function fileMenu(path, e) {
+  const fl = flagOf(path);
+  const tabbed = S.tabs.includes(path);
+  const item = (icon, label, run) => h("button", { class: "ctx-item", role: "menuitem", onclick: () => (closeCtx(), run()) },
+    h("span", { class: "ctx-ic", html: icon }), label);
+  fill(ctx,
+    item(ICON.heart, fl.fav ? "Remove from favourites" : "Add to favourites", () => setFlag(path, "fav", !fl.fav)),
+    item(ICON.pin, fl.pin ? "Unpin" : "Pin to the top", () => setFlag(path, "pin", !fl.pin)),
+    h("div", { class: "ctx-sep" }),
+    h("div", { class: "ctx-label" }, "Colour mark"),
+    h("div", { class: "ctx-marks" },
+      MARKS.map((m) => h("button", {
+        class: "sw mk-" + m + (fl.mark === m ? " on" : ""), title: m[0].toUpperCase() + m.slice(1), "aria-label": "Mark " + m,
+        onclick: () => (closeCtx(), setFlag(path, "mark", fl.mark === m ? null : m)),
+      })),
+      fl.mark ? h("button", { class: "sw none", title: "No mark", html: ICON.x, onclick: () => (closeCtx(), setFlag(path, "mark", null)) }) : null),
+    h("div", { class: "ctx-sep" }),
+    tabbed ? item(ICON.x, "Close tab", () => closeTab(path)) : item(ICON.tab, "Open in a new tab", () => openFile(path)));
+  ctx.classList.add("on");
+  const row = $("fileList").querySelector(`[data-path="${CSS.escape(path)}"]`);
+  const rr = row?.getBoundingClientRect();
+  let x = e?.clientX || (rr ? rr.right - 30 : 100);
+  let y = e?.clientY || (rr ? rr.bottom + 4 : 100);
+  const box = ctx.getBoundingClientRect();
+  x = Math.min(x, window.innerWidth - box.width - 8);
+  if (y + box.height > window.innerHeight - 8) y = Math.max(8, y - box.height - (e?.clientY ? 0 : (rr?.height || 0) + 8));
+  ctx.style.left = x + "px";
+  ctx.style.top = y + "px";
+  ctx.querySelector("button")?.focus();
+}
+
+function closeCtx() {
+  ctx.classList.remove("on");
+}
+
+// ---------- tabs ----------
+
+const saveTabs = () => store.set("tabs:" + WS, S.tabs);
+const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
+
+function renderTabs() {
+  // A tab whose file was deleted or renamed underneath us goes away quietly.
+  const known = new Set(S.files.filter((f) => f.editable).map((f) => f.path));
+  if (S.files.length && S.tabs.some((p) => !known.has(p))) {
+    S.tabs = S.tabs.filter((p) => known.has(p));
+    saveTabs();
+  }
+  const counts = new Map();
+  for (const t of S.threads) if (t.status === "open") counts.set(t.file, (counts.get(t.file) || 0) + 1);
+  // The same name in two folders needs its folder to be told apart.
+  const names = new Map();
+  for (const p of S.tabs) names.set(baseName(p), (names.get(baseName(p)) || 0) + 1);
+  const strip = $("tabs");
+  fill(strip, S.tabs.map((p, i) => {
+    const fl = flagOf(p);
+    const d = dirOf(p);
+    return h("div", {
+      class: "tab" + (p === S.file ? " on" : "") + (fl.mark ? " mk-" + fl.mark : "") + (fl.pin ? " pinned" : ""),
+      role: "tab", "aria-selected": String(p === S.file), tabindex: "0", draggable: "true",
+      title: p + (i < 9 ? `  (⌥${i + 1})` : ""), "data-path": p,
+      onclick: () => p !== S.file && openFile(p),
+      onauxclick: (e) => e.button === 1 && (e.preventDefault(), closeTab(p)),
+      onkeydown: (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openFile(p)),
+      oncontextmenu: (e) => (e.preventDefault(), fileMenu(p, e)),
+      ondragstart: (e) => (e.dataTransfer.setData("text/x-tab", p), e.dataTransfer.effectAllowed = "move"),
+      ondragover: (e) => e.dataTransfer.types.includes("text/x-tab") && e.preventDefault(),
+      ondrop: (e) => {
+        e.preventDefault();
+        const from = e.dataTransfer.getData("text/x-tab");
+        if (!from || from === p) return;
+        const rest = S.tabs.filter((t) => t !== from);
+        const r = e.currentTarget.getBoundingClientRect();
+        rest.splice(rest.indexOf(p) + (e.clientX > r.left + r.width / 2 ? 1 : 0), 0, from);
+        S.tabs = rest;
+        saveTabs();
+        renderTabs();
+      },
+    },
+      fl.fav ? h("span", { class: "tab-fav", html: ICON.heart }) : null,
+      h("span", { class: "tab-nm" }, names.get(baseName(p)) > 1 && d ? h("span", { class: "nm-dir" }, d.slice(d.lastIndexOf("/") + 1) + "/") : null, baseName(p)),
+      S.baselines.has(p) ? h("span", { class: "chg", title: "AI changes to review" }) : null,
+      counts.get(p) ? h("span", { class: "badge" }, String(counts.get(p))) : null,
+      h("span", { class: "tab-x", role: "button", title: "Close tab (⌥W)", html: ICON.x, onclick: (e) => (e.stopPropagation(), closeTab(p)) }));
+  }));
+  document.body.classList.toggle("has-tabs", S.tabs.length > 0);
+  strip.querySelector(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+async function closeTab(path) {
+  const i = S.tabs.indexOf(path);
+  if (i < 0) return;
+  S.tabs.splice(i, 1);
+  saveTabs();
+  if (path !== S.file) return renderTabs(), renderSidebar();
+  // Like a browser: the tab to the right takes over, or the one to the left at the end of the strip.
+  const next = S.tabs[i] ?? S.tabs[i - 1];
+  if (next) await openFile(next);
+  else await closeFile();
+}
+
+// Back to the "pick a file" page once the last tab is closed.
+async function closeFile() {
+  if (S.file) saveView();
+  if (S.dirty) await save();
+  closeModal(true);
+  hideChip();
+  S.file = null;
+  S.text = "";
+  S.draft = null;
+  S.active = null;
+  S.live = new Map();
+  store.set("lastFile:" + WS, null);
+  const url = new URL(location.href);
+  url.searchParams.delete("file");
+  history.replaceState(null, "", url);
+  document.body.classList.add("no-file");
+  $("fileName").textContent = "—";
+  $("modes").replaceChildren();
+  $("margin").replaceChildren();
+  renderTabs();
+  renderSidebar();
+}
+
+function switchTab(delta) {
+  if (!S.tabs.length) return;
+  const i = S.tabs.indexOf(S.file);
+  openFile(S.tabs[(i + delta + S.tabs.length) % S.tabs.length]);
 }
 
 // ---------- display rules ----------
@@ -661,6 +854,12 @@ async function openFile(path) {
   S.draft = null;
   S.active = null;
   S.undo = [];
+  // A new file opens in a tab next to the current one.
+  if (!S.tabs.includes(path)) {
+    const at = S.tabs.indexOf(S.file);
+    S.tabs.splice(at < 0 ? S.tabs.length : at + 1, 0, path);
+    saveTabs();
+  }
   S.file = path;
   S.kind = kindOf(path);
   // Never leave the open file hidden inside a collapsed folder.
@@ -678,6 +877,7 @@ async function openFile(path) {
   const preferred = store.get("mode:" + S.kind, modes[0]);
   setMode(modes.includes(preferred) && preferred !== "changes" ? preferred : modes[0], true);
   renderSidebar({ reveal: true });
+  renderTabs();
   restoreView();
 }
 
@@ -2192,6 +2392,19 @@ function wire() {
     setTimeout(layoutCards, 320);
   });
   $("fileFilter").addEventListener("input", () => renderSidebar());
+  $("favOnly").addEventListener("click", () => {
+    S.favOnly = !S.favOnly;
+    store.set("favOnly:" + WS, S.favOnly);
+    renderSidebar();
+  });
+  document.addEventListener("mousedown", (e) => ctx.classList.contains("on") && !ctx.contains(e.target) && closeCtx());
+  $("fileList").addEventListener("scroll", closeCtx, { passive: true });
+  // The wheel scrolls the tab strip sideways.
+  $("tabs").addEventListener("wheel", (e) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    e.preventDefault();
+    $("tabs").scrollLeft += e.deltaY;
+  }, { passive: false });
   let sideScrollTimer = null;
   $("fileList").addEventListener("scroll", () => {
     clearTimeout(sideScrollTimer);
@@ -2257,7 +2470,25 @@ function wire() {
       e.preventDefault();
       return toggleOutline();
     }
+    // Tabs: ⌥1–9 jumps, ⌥[ / ⌥] steps, ⌥W closes. Matched on the physical key, since ⌥ turns the
+    // digit into another character on a Mac.
+    if (e.altKey && !e.metaKey && !e.ctrlKey) {
+      const digit = /^Digit([1-9])$/.exec(e.code);
+      if (digit && !e.shiftKey && S.tabs.length) {
+        e.preventDefault();
+        return openFile(S.tabs[Math.min(Number(digit[1]), S.tabs.length) - 1]);
+      }
+      if (e.code === "BracketLeft" || e.code === "BracketRight") {
+        e.preventDefault();
+        return switchTab(e.code === "BracketLeft" ? -1 : 1);
+      }
+      if (e.code === "KeyW" && !e.shiftKey && S.file) {
+        e.preventDefault();
+        return closeTab(S.file);
+      }
+    }
     if (e.key === "Escape") {
+      if (ctx.classList.contains("on")) return closeCtx();
       if (palette.classList.contains("on")) return closePalette();
       if (outlineBox.classList.contains("on")) return closeOutline();
       if (rec) return closeRecipes();
