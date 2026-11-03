@@ -11,6 +11,7 @@ import { COMMANDS, ACTION_LABEL, findCommand, parseCommand } from "./commands.js
 import { renderPdf, pageAt, toPdf, rangeRects, paintMarks, marksAt } from "./pdfview.js";
 import { matchInSource, pointInSource } from "./pdfmatch.js";
 import { BRIEF_PRESETS, briefLabel } from "./briefs.js";
+import { commentOrder, jumpTarget } from "./commentnav.js";
 
 // ---------- basics ----------
 
@@ -204,6 +205,7 @@ async function refreshState() {
   renderSidebar();
   renderTabs();
   renderBrief();
+  renderCommentNav();
 }
 
 let refreshTimer = null;
@@ -549,6 +551,7 @@ async function closeFile() {
   $("fileName").textContent = "—";
   $("modes").replaceChildren();
   $("margin").replaceChildren();
+  renderCommentNav();
   renderTabs();
   renderSidebar();
 }
@@ -938,8 +941,10 @@ function renderView() {
   if (S.mode === "read") renderDoc();
   else if (S.mode === "edit") renderSource();
   else if (S.mode === "changes") renderChanges();
-  if (S.mode === "read" || S.mode === "edit" || S.mode === "pdf") renderCards();
+  // Marks before cards: a card with nothing to sit next to would start at the top of the margin.
   if (S.mode === "pdf") paintPdf();
+  if (S.mode === "read" || S.mode === "edit" || S.mode === "pdf") renderCards();
+  renderCommentNav();
 }
 
 function viewEl() {
@@ -1262,8 +1267,9 @@ chip.addEventListener("mousedown", (e) => e.preventDefault());
 chip.addEventListener("click", () => {
   if (!S.chip) return;
   const { start, end, pdf } = S.chip;
+  const y = chip.getBoundingClientRect().top;
   hideChip();
-  startDraft(start, end, pdf);
+  startDraft(start, end, pdf, y);
 });
 
 function readSelection() {
@@ -1284,7 +1290,7 @@ document.addEventListener("mousedown", (e) => {
 document.addEventListener("mouseup", (e) => {
   if (S.file && S.mode === "pdf") return void pdfMouseUp(e);
   if (!S.file || (S.mode !== "read" && S.mode !== "edit")) return;
-  if (e.target.closest(".card, .add-chip, .modal, .top, .sidebar, .autocomplete")) return;
+  if (e.target.closest(".card, .add-chip, .comment-nav, .modal, .top, .sidebar, .autocomplete")) return;
   setTimeout(() => {
     const sel = readSelection();
     if (sel && !sel.collapsed && sel.end > sel.start) return showChip(sel, sel.rect.top);
@@ -1323,14 +1329,17 @@ function pointAt(x, y) {
   return Number(y > br.top + br.height / 2 ? best.dataset.e : best.dataset.s);
 }
 
-async function startDraft(start, end, pdf = null) {
+// y is the screen height the comment was started at. On the PDF the highlight can arrive later than
+// the card, so the card waits at that height instead of sliding in from the top of the margin.
+async function startDraft(start, end, pdf = null, y = null) {
   if (!S.file) return;
   if (S.mode === "edit" && S.dirty) await save();
   window.getSelection()?.removeAllRanges?.();
-  S.draft = { start, end, pdf };
+  S.draft = { start, end, pdf, y: y == null ? null : y - $("margin").getBoundingClientRect().top };
   S.active = "draft";
   renderView();
-  requestAnimationFrame(() => document.querySelector('.card.draft textarea')?.focus());
+  // The card is already at its text; focusing must not move the view, even while the card settles.
+  requestAnimationFrame(() => document.querySelector('.card.draft textarea')?.focus({ preventScroll: true }));
 }
 
 function cancelDraft() {
@@ -1511,7 +1520,7 @@ function renderCards() {
   if (focused) {
     const ta = margin.querySelector(`.card[data-id="${focused}"] textarea`);
     if (ta) {
-      ta.focus();
+      ta.focus({ preventScroll: true });
       if (caret != null) ta.setSelectionRange(caret, caret);
     }
   }
@@ -1530,7 +1539,8 @@ function layoutCards() {
   const floor = det ? det.offsetHeight + 12 : 0;
   const cards = [...margin.querySelectorAll(":scope > .card")].map((c) => {
     const a = anchorEl(c.dataset.id);
-    return { c, want: a ? a.getBoundingClientRect().top - mtop - 10 : 0, h: c.offsetHeight };
+    const fallback = c.dataset.id === "draft" ? S.draft?.y ?? 0 : 0;
+    return { c, want: a ? a.getBoundingClientRect().top - mtop - 10 : fallback, h: c.offsetHeight };
   });
   cards.sort((x, y) => x.want - y.want);
   const gap = 10;
@@ -1562,6 +1572,53 @@ function layoutCards() {
     bottom = Math.max(bottom, pos[i] + x.h);
   });
   margin.style.minHeight = bottom + 40 + "px";
+  renderCommentNav();
+}
+
+// ---------- previous / next comment ----------
+//
+// A fixed control: it never moves or changes width, so repeated clicks need no mouse movement. It
+// counts every comment in the file, resolved or not, whatever "Show resolved" says.
+
+const navItems = () => fileThreads().map((t) => ({ id: t.id, start: S.live.get(t.id)?.start ?? null }));
+
+function renderCommentNav() {
+  const items = S.file && S.mode !== "changes" ? commentOrder(navItems()) : [];
+  $("commentNav").classList.toggle("on", items.length > 0);
+  const i = items.findIndex((x) => x.id === S.active);
+  $("commentNavCount").textContent = `${i >= 0 ? i + 1 : "–"} / ${items.length}`;
+}
+
+// The source offset of the first comment at or below the top of the view, whatever the mode.
+function commentViewPos(items) {
+  const top = $("scroller").getBoundingClientRect().top + 8;
+  for (const x of commentOrder(items)) {
+    const a = x.start != null ? anchorEl(x.id) : null;
+    if (a && a.getBoundingClientRect().top >= top) return x.start;
+  }
+  return Infinity;
+}
+
+async function jumpComment(delta) {
+  if (!S.file || S.mode === "changes") return;
+  const items = navItems();
+  const id = jumpTarget(items, S.active, delta, commentViewPos(items));
+  if (!id) return;
+  const t = fileThreads().find((x) => x.id === id);
+  hideChip();
+  setActive(id);
+  // A resolved comment that "Show resolved" hides has no card or highlight until it is active.
+  if (t.status === "resolved" && !S.showResolved) renderView();
+  if (S.mode === "pdf") await paintPdf();
+  if (S.active !== id) return;
+  const sc = $("scroller");
+  const box = sc.getBoundingClientRect();
+  if (!S.live.has(id)) return sc.scrollTo({ top: 0, behavior: "smooth" });
+  const a = anchorEl(id);
+  if (!a) return;
+  const by = a.getBoundingClientRect().top - box.top - box.height / 3;
+  // Gliding across many pages would hold up the next click; only a nearby comment gets the slide.
+  sc.scrollBy({ top: by, behavior: Math.abs(by) > box.height * 1.5 ? "instant" : "smooth" });
 }
 
 function markActive() {
@@ -1613,7 +1670,7 @@ document.addEventListener("click", (e) => {
     if (f && S.files.find((x) => x.path === f && x.editable)) openFile(f);
     return;
   }
-  if (!e.target.closest(".card, .modal, .add-chip, .autocomplete, .toast, .top") && S.active && S.active !== "draft") {
+  if (!e.target.closest(".card, .modal, .add-chip, .comment-nav, .autocomplete, .toast, .top") && S.active && S.active !== "draft") {
     if (!window.getSelection()?.toString()) setActive(null);
   }
 });
@@ -1677,7 +1734,7 @@ async function editMessage(t, m) {
     onCancel: () => scheduleRefresh(),
   });
   msgEl.replaceChildren(c);
-  c.querySelector("textarea").focus();
+  c.querySelector("textarea").focus({ preventScroll: true });
 }
 
 async function deleteMessage(t, m) {
@@ -2123,7 +2180,7 @@ async function pdfLine(page, x, y) {
 }
 
 async function pdfMouseUp(e) {
-  if (e.target.closest(".card, .add-chip, .modal, .top, .sidebar, .autocomplete")) return;
+  if (e.target.closest(".card, .add-chip, .comment-nav, .modal, .top, .sidebar, .autocomplete")) return;
   const root = $("pdfPages");
   const sel = window.getSelection();
   const moved = mouseDownAt && Math.hypot(e.clientX - mouseDownAt.x, e.clientY - mouseDownAt.y) > 4;
@@ -2519,6 +2576,10 @@ function setReading(patch) {
 
 function wire() {
   $("sendBtn").addEventListener("click", (e) => (e.stopPropagation(), send()));
+  $("prevComment").addEventListener("click", () => jumpComment(-1));
+  $("nextComment").addEventListener("click", () => jumpComment(1));
+  // Clicking the control leaves focus and any selection where they were.
+  $("commentNav").addEventListener("mousedown", (e) => e.preventDefault());
   $("briefBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     briefBox.classList.contains("open") ? closeBrief() : openBrief();
@@ -2634,6 +2695,10 @@ function wire() {
       if (e.code === "BracketLeft" || e.code === "BracketRight") {
         e.preventDefault();
         return switchTab(e.code === "BracketLeft" ? -1 : 1);
+      }
+      if ((e.code === "Comma" || e.code === "Period") && !e.shiftKey) {
+        e.preventDefault();
+        return jumpComment(e.code === "Comma" ? -1 : 1);
       }
       if (e.code === "KeyW" && !e.shiftKey && S.file) {
         e.preventDefault();

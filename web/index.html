@@ -145,6 +145,16 @@
     <span>Comment</span>
   </button>
 
+  <div class="comment-nav" id="commentNav" role="group" aria-label="Jump between comments">
+    <button class="icon-btn sm" id="prevComment" title="Previous comment (⌥,)" aria-label="Previous comment">
+      <svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>
+    </button>
+    <span class="comment-nav-count" id="commentNavCount" aria-live="polite"></span>
+    <button class="icon-btn sm" id="nextComment" title="Next comment (⌥.)" aria-label="Next comment">
+      <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+  </div>
+
   <div class="palette-backdrop" id="paletteBackdrop"></div>
   <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="Quick search">
     <div class="palette-in">

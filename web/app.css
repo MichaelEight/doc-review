@@ -1274,3 +1274,23 @@ img.hl-ai, .math.hl-ai { outline-color: var(--hl-ai-line); }
 .sc-target code { font-family: var(--mono); color: var(--ink-2); }
 .sc-foot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 14px; }
 @media (max-width: 980px) { .brief-btn span { display: none; } .brief-btn { padding: 0 9px; } }
+
+/* ---------- previous / next comment ---------- */
+
+/* Fixed, with a fixed-width counter: the buttons stay under the cursor between clicks. */
+.comment-nav {
+  position: fixed;
+  right: 24px;
+  bottom: 20px;
+  z-index: 25;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+}
+.comment-nav.on { display: flex; }
+.comment-nav-count { width: 66px; text-align: center; font: 600 12.5px var(--ui); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
