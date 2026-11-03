@@ -26,6 +26,10 @@
         <svg viewBox="0 0 24 24"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></svg>
       </button>
       <span class="agent-pill" id="agentPill"><i></i><span></span></span>
+      <button class="brief-btn" id="briefBtn" title="Instruction sent with every comment" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><path d="M5 4h14v16l-7-4-7 4z"/></svg>
+        <span id="briefLabel">Instruction</span>
+      </button>
       <button class="btn primary big" id="sendBtn" disabled title="Send comments to the AI (⌘⇧↵)">
         <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
         <span>Send to AI</span>
@@ -33,6 +37,26 @@
       </button>
     </div>
   </header>
+  <div class="brief" id="brief" role="dialog" aria-label="Instruction for the AI">
+    <div class="brief-head">
+      <h4>Instruction for the AI</h4>
+      <p>Goes with every comment you send in this folder until you clear it, so a comment can be just "todo" or "important name". You confirm it at each Send.</p>
+    </div>
+    <div class="brief-presets" id="briefPresets"></div>
+    <textarea id="briefText" rows="5" placeholder="e.g. Don't edit the text. Save each passage I comment on to the target file, labelled with my comment." spellcheck="true"></textarea>
+    <label class="brief-target">
+      <span>Target file <i>optional</i></span>
+      <input id="briefTarget" list="briefFiles" placeholder="e.g. notes/collected.md" spellcheck="false" autocomplete="off">
+      <datalist id="briefFiles"></datalist>
+    </label>
+    <div class="brief-foot">
+      <span class="brief-saved" id="briefSaved"></span>
+      <span class="brief-name" id="briefNameWrap"><input id="briefName" placeholder="Preset name" maxlength="60"></span>
+      <button class="btn small ghost" id="briefSavePreset">Save as preset</button>
+      <button class="btn small ghost" id="briefClear">Clear</button>
+    </div>
+  </div>
+  <div class="send-confirm" id="sendConfirm" role="dialog" aria-label="Send with instruction"></div>
   <div class="reading" id="reading" role="dialog" aria-label="Reading settings">
     <section>
       <h4>Font</h4>

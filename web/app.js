@@ -10,6 +10,7 @@ import { shortcut, command } from "./format.js";
 import { COMMANDS, ACTION_LABEL, findCommand, parseCommand } from "./commands.js";
 import { renderPdf, pageAt, toPdf, rangeRects, paintMarks, marksAt } from "./pdfview.js";
 import { matchInSource, pointInSource } from "./pdfmatch.js";
+import { BRIEF_PRESETS, briefLabel } from "./briefs.js";
 
 // ---------- basics ----------
 
@@ -112,6 +113,7 @@ const S = {
   tabs: store.get("tabs:" + WS, []),
   flags: store.get("fileFlags:" + WS, {}),
   favOnly: store.get("favOnly:" + WS, false),
+  brief: null, briefPresets: [],
   wsName: "",
   chip: null,
 };
@@ -190,6 +192,8 @@ async function refreshState() {
   S.threads = st.threads;
   S.tags = st.tags;
   S.styles = st.styles || [];
+  S.brief = st.brief || null;
+  S.briefPresets = st.briefPresets || [];
   S.baselines = new Set(st.baselines);
   S.latex = st.latex;
   S.synctex = st.synctex;
@@ -199,6 +203,7 @@ async function refreshState() {
   setStatus(st);
   renderSidebar();
   renderTabs();
+  renderBrief();
 }
 
 let refreshTimer = null;
@@ -2173,18 +2178,147 @@ function goToLine(n) {
 
 // ---------- send ----------
 
-async function send() {
+// With a standing instruction set, Send asks first: it is easy to forget one is on.
+function send() {
   if (!S.pending) return toast("Nothing to send yet. Add a comment first.");
+  if (S.brief) return openSendConfirm();
+  return submit(true);
+}
+
+async function submit(withBrief) {
+  closeSendConfirm();
   if (S.dirty) await save();
   const btn = $("sendBtn");
   btn.animate([{ transform: "scale(1)" }, { transform: "scale(0.95)" }, { transform: "scale(1)" }], { duration: 260, easing: "ease-out" });
   try {
-    const r = await api("POST", "/api/submit");
-    toast(r.agentWaiting ? `Sent ${r.threads} comment${r.threads === 1 ? "" : "s"} to the AI` : `Queued ${r.threads} comment${r.threads === 1 ? "" : "s"}. The AI gets them as soon as it listens.`);
+    const r = await api("POST", "/api/submit", { withBrief });
+    const n = `${r.threads} comment${r.threads === 1 ? "" : "s"}`;
+    const extra = withBrief && S.brief ? " with your instruction" : "";
+    toast(r.agentWaiting ? `Sent ${n} to the AI${extra}` : `Queued ${n}${extra}. The AI gets them as soon as it listens.`);
     scheduleRefresh();
   } catch (err) {
     toast(err.message);
   }
+}
+
+// ---------- standing instruction ----------
+
+const briefBox = $("brief");
+const confirmBox = $("sendConfirm");
+let briefTimer = null;
+
+function renderBrief() {
+  const on = !!S.brief;
+  const btn = $("briefBtn");
+  btn.classList.toggle("on", on);
+  $("briefLabel").textContent = on ? briefLabel(S.brief, S.briefPresets) : "Instruction";
+  btn.title = on ? `Instruction sent with every comment:\n${S.brief.text}${S.brief.target ? `\n→ ${S.brief.target}` : ""}` : "Set an instruction sent with every comment";
+  // Never overwrite what the user is typing with the server's echo of it.
+  if (!briefBox.contains(document.activeElement) && !briefTimer) {
+    $("briefText").value = S.brief?.text ?? "";
+    $("briefTarget").value = S.brief?.target ?? "";
+  }
+  renderBriefPresets();
+}
+
+function renderBriefPresets() {
+  const cur = $("briefText").value.trim();
+  const chip = (p, own) => h("button", {
+    class: "brief-chip" + (p.text === cur ? " on" : "") + (own ? " own" : ""),
+    title: p.text + (p.target ? `\n→ ${p.target}` : ""),
+    onclick: () => {
+      $("briefText").value = p.text;
+      $("briefTarget").value = p.target ?? "";
+      saveBriefSoon(0);
+      renderBriefPresets();
+    },
+  }, p.name, own ? h("span", {
+    class: "x", role: "button", title: "Delete this preset", html: ICON.x,
+    onclick: async (e) => {
+      e.stopPropagation();
+      try {
+        await api("DELETE", "/api/brief-presets/" + p.id);
+        scheduleRefresh();
+      } catch (err) {
+        toast(err.message);
+      }
+    },
+  }) : null);
+  fill($("briefPresets"), BRIEF_PRESETS.map((p) => chip(p, false)), S.briefPresets.map((p) => chip(p, true)));
+}
+
+function saveBriefSoon(ms = 500) {
+  clearTimeout(briefTimer);
+  $("briefSaved").textContent = "";
+  briefTimer = setTimeout(async () => {
+    briefTimer = null;
+    try {
+      const r = await api("PUT", "/api/brief", { text: $("briefText").value, target: $("briefTarget").value });
+      S.brief = r.brief;
+      $("briefSaved").textContent = r.brief ? "Saved" : "Off";
+      renderBrief();
+    } catch (err) {
+      $("briefSaved").textContent = err.message;
+    }
+  }, ms);
+}
+
+function openBrief() {
+  closeSendConfirm();
+  $("reading").classList.remove("open");
+  $("briefFiles").replaceChildren(...S.files.filter((f) => f.editable).map((f) => h("option", { value: f.path })));
+  $("briefSaved").textContent = "";
+  briefBox.classList.add("open");
+  $("briefBtn").setAttribute("aria-expanded", "true");
+  renderBrief();
+  $("briefText").focus();
+}
+
+function closeBrief() {
+  if (!briefBox.classList.contains("open")) return;
+  briefBox.classList.remove("open");
+  $("briefBtn").setAttribute("aria-expanded", "false");
+  $("briefNameWrap").classList.remove("on");
+  // Flush a pending save rather than drop the last keystrokes.
+  if (briefTimer) saveBriefSoon(0);
+}
+
+async function saveBriefPreset() {
+  const wrap = $("briefNameWrap");
+  if (!wrap.classList.contains("on")) {
+    wrap.classList.add("on");
+    return $("briefName").focus();
+  }
+  const name = $("briefName").value.trim();
+  if (!name) return $("briefName").focus();
+  try {
+    await api("POST", "/api/brief-presets", { name, text: $("briefText").value, target: $("briefTarget").value });
+    $("briefName").value = "";
+    wrap.classList.remove("on");
+    $("briefSaved").textContent = `Saved preset "${name}"`;
+    scheduleRefresh();
+  } catch (err) {
+    $("briefSaved").textContent = err.message;
+  }
+}
+
+function openSendConfirm() {
+  closeBrief();
+  const n = `${S.pending} comment${S.pending === 1 ? "" : "s"}`;
+  fill(confirmBox,
+    h("h4", {}, `Send ${n} with your instruction?`),
+    S.brief.text ? h("blockquote", {}, S.brief.text) : null,
+    S.brief.target ? h("div", { class: "sc-target" }, "Target file: ", h("code", {}, S.brief.target)) : null,
+    h("div", { class: "sc-foot" },
+      h("button", { class: "btn small ghost", onclick: () => openBrief() }, "Edit"),
+      h("button", { class: "btn small ghost", onclick: () => submit(false) }, "Send without it"),
+      h("button", { class: "btn small primary", id: "scSend", onclick: () => submit(true) }, "Send")));
+  confirmBox.classList.add("open");
+  $("scSend").focus();
+}
+
+function closeSendConfirm() {
+  confirmBox.classList.remove("open");
 }
 
 // ---------- toasts ----------
@@ -2384,7 +2518,26 @@ function setReading(patch) {
 // ---------- wiring ----------
 
 function wire() {
-  $("sendBtn").addEventListener("click", send);
+  $("sendBtn").addEventListener("click", (e) => (e.stopPropagation(), send()));
+  $("briefBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    briefBox.classList.contains("open") ? closeBrief() : openBrief();
+  });
+  for (const box of [briefBox, confirmBox]) box.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => (closeBrief(), closeSendConfirm()));
+  $("briefText").addEventListener("input", () => (saveBriefSoon(), renderBriefPresets()));
+  $("briefTarget").addEventListener("input", () => saveBriefSoon());
+  $("briefSavePreset").addEventListener("click", saveBriefPreset);
+  $("briefName").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") return e.preventDefault(), saveBriefPreset();
+    if (e.key === "Escape") return e.stopPropagation(), $("briefNameWrap").classList.remove("on");
+  });
+  $("briefClear").addEventListener("click", () => {
+    $("briefText").value = "";
+    $("briefTarget").value = "";
+    saveBriefSoon(0);
+    renderBriefPresets();
+  });
   $("sidebarToggle").addEventListener("click", () => {
     const hidden = !$("sidebar").classList.contains("hidden");
     $("sidebar").classList.toggle("hidden", hidden);
@@ -2489,6 +2642,8 @@ function wire() {
     }
     if (e.key === "Escape") {
       if (ctx.classList.contains("on")) return closeCtx();
+      if (confirmBox.classList.contains("open")) return closeSendConfirm();
+      if (briefBox.classList.contains("open")) return closeBrief();
       if (palette.classList.contains("on")) return closePalette();
       if (outlineBox.classList.contains("on")) return closeOutline();
       if (rec) return closeRecipes();
@@ -2499,7 +2654,7 @@ function wire() {
     }
     const inField = e.target.closest?.("textarea, input");
     const cmd = shortcut(e);
-    if (cmd === "send") return e.preventDefault(), send();
+    if (cmd === "send") return e.preventDefault(), confirmBox.classList.contains("open") ? submit(true) : send();
     if (inField) return;
     if (S.mode !== "read" || !S.file) return;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {

@@ -7,6 +7,7 @@ import { resolveAnchor, makeAnchor, lineOf, extractRefs } from "../web/anchor.js
 import { offsetMapper, mapRange } from "../web/remap.js";
 import { parseCommand } from "../web/commands.js";
 import { normalizeRule, rulesFor } from "../web/display.js";
+import { normalizeBrief } from "../web/briefs.js";
 
 export const EDITABLE = new Set([".md", ".markdown", ".txt", ".tex", ".bib"]);
 const SKIP_DIRS = new Set(["node_modules", ".git", ".doc-review", "dist", "build", "__pycache__", ".venv", "venv"]);
@@ -44,7 +45,7 @@ export class Workspace {
   // ---------- persistence ----------
 
   load() {
-    const empty = { version: 1, threads: [], rounds: [], tags: {}, styles: [] };
+    const empty = { version: 1, threads: [], rounds: [], tags: {}, styles: [], brief: null, briefPresets: [] };
     try {
       this.state = { ...empty, ...JSON.parse(fs.readFileSync(this.file, "utf8")) };
     } catch {
@@ -451,6 +452,52 @@ export class Workspace {
     return { tag: key, ...this.state.tags[key] };
   }
 
+  // ---------- standing instruction ----------
+  //
+  // One instruction the user sets for the whole folder ("collect what I mark, don't edit"). It rides
+  // along with every Send until cleared; submit() snapshots it, so changing it mid-round does not
+  // rewrite what the agent was already handed.
+
+  setBrief(b) {
+    const brief = normalizeBrief(b);
+    if (brief?.target) this.resolve(brief.target);
+    this.state.brief = brief && { ...brief, updatedAt: now() };
+    this.save();
+    this.emit({ type: "threads" });
+    return { brief: this.state.brief };
+  }
+
+  saveBriefPreset({ name, text, target }) {
+    const brief = normalizeBrief({ text, target });
+    const nm = String(name ?? "").trim().slice(0, 60);
+    if (!nm) throw new Error("a preset needs a name");
+    if (!brief?.text) throw new Error("a preset needs instruction text");
+    const list = (this.state.briefPresets || []).filter((p) => p.name !== nm);
+    const preset = { id: newId("bp"), name: nm, ...brief };
+    this.state.briefPresets = [...list, preset];
+    this.save();
+    this.emit({ type: "threads" });
+    return preset;
+  }
+
+  deleteBriefPreset(id) {
+    this.state.briefPresets = (this.state.briefPresets || []).filter((p) => p.id !== id);
+    this.save();
+    this.emit({ type: "threads" });
+  }
+
+  // What the agent receives: the instruction plus where the target file is and whether it exists.
+  briefForAgent(b) {
+    if (!b) return null;
+    const out = { text: b.text || undefined };
+    if (b.target) {
+      out.target_file = b.target;
+      out.target_abs_path = this.resolve(b.target);
+      out.target_exists = fs.existsSync(out.target_abs_path);
+    }
+    return out;
+  }
+
   // ---------- display rules ----------
   //
   // Colouring that applies to how a file is shown, never to what it contains. Rules live in
@@ -500,7 +547,7 @@ export class Workspace {
 
   // ---------- rounds ----------
 
-  submit() {
+  submit({ withBrief = true } = {}) {
     const ids = [];
     for (const t of this.state.threads) {
       let any = false;
@@ -508,7 +555,10 @@ export class Workspace {
       if (any) ids.push(t.id);
     }
     if (!ids.length) throw new Error("nothing to send: add a comment first");
-    this.state.rounds.push({ id: this.state.rounds.length + 1, submittedAt: now(), threads: ids });
+    const brief = withBrief && this.state.brief ? normalizeBrief(this.state.brief) : null;
+    // Waiting for the agent: a later Send replaces the instruction of one it has not picked up yet.
+    this.state.pendingBrief = brief;
+    this.state.rounds.push({ id: this.state.rounds.length + 1, submittedAt: now(), threads: ids, ...(brief ? { brief } : {}) });
     this.save();
     this.emit({ type: "threads" });
     const agentWaiting = this.waiters.length > 0;
@@ -614,6 +664,8 @@ export class Workspace {
       for (const m of t.messages) if (m.state === "submitted") m.state = "delivered";
     }
     const round = this.state.rounds[this.state.rounds.length - 1];
+    const instruction = this.briefForAgent(this.state.pendingBrief);
+    delete this.state.pendingBrief;
     this.save();
     this.emit({ type: "threads" });
     this.emit({ type: "round_start", threads: threads.length });
@@ -625,7 +677,14 @@ export class Workspace {
       comments: described,
       referenced_files: files,
       tags,
+      ...(instruction ? { instruction } : {}),
       next:
+        (instruction
+          ? "The user set a standing instruction for this round (`instruction`). It applies to every comment and overrides " +
+            "the default below wherever they conflict (if it says not to edit, leave the commented files untouched); a " +
+            "comment that explicitly asks otherwise still wins for that comment. When it names a target_file, write there " +
+            "(create it if target_exists is false). "
+          : "") +
         "Work through every comment: edit the files directly, then for each comment call review_resolve (with a short note such as " +
         "\"Corrected\") or review_reply (kind=question if you need an answer; kind=note to explain without resolving). When all are " +
         "handled call review_finish with a one-line summary, then review_wait again for the next round. A comment with a " +

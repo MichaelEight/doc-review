@@ -96,7 +96,7 @@ export class ReviewHttp {
     if (route === "GET /api/state") {
       return send(res, 200, {
         id: ws.id, root: ws.root, name: ws.name, files: ws.listFiles(), threads: ws.state.threads, tags: ws.state.tags,
-        styles: ws.styleRules(), baselines: Object.keys(ws.baselines), latex: latexAvailable(), synctex: synctexAvailable(), ...ws.status(),
+        styles: ws.styleRules(), brief: ws.state.brief ?? null, briefPresets: ws.state.briefPresets || [], baselines: Object.keys(ws.baselines), latex: latexAvailable(), synctex: synctexAvailable(), ...ws.status(),
       });
     }
     if (route === "GET /api/events") return this.events(ws, req, res);
@@ -116,7 +116,11 @@ export class ReviewHttp {
     if (tm && !url.pathname.includes("/messages") && req.method === "PATCH") return send(res, 200, ws.setStatus(tm[1], body.status));
     if (tm && !url.pathname.includes("/messages") && req.method === "DELETE") return send(res, 200, (ws.deleteThread(tm[1]), { ok: true }));
     if (sm && req.method === "PATCH") return send(res, 200, ws.enableStyleRule(sm[1], body.enabled));
-    if (route === "POST /api/submit") return send(res, 200, ws.submit());
+    if (route === "POST /api/submit") return send(res, 200, ws.submit({ withBrief: body.withBrief !== false }));
+    if (route === "PUT /api/brief") return send(res, 200, ws.setBrief(body));
+    if (route === "POST /api/brief-presets") return send(res, 200, ws.saveBriefPreset(body));
+    const bp = url.pathname.match(/^\/api\/brief-presets\/([\w]+)$/);
+    if (bp && req.method === "DELETE") return send(res, 200, (ws.deleteBriefPreset(bp[1]), { ok: true }));
     if (route === "POST /api/latex") {
       const out = await compileLatex(ws, body.path);
       return send(res, 200, { ...out, pdf: out.pdf ? `/api/pdf?ws=${ws.id}&t=${this.token}&path=${encodeURIComponent(body.path)}&v=${Date.now()}` : null });

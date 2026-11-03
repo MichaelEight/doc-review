@@ -29,7 +29,8 @@ export const TOOLS = [
     name: "review_wait",
     description:
       "Block until the user presses \"Send to AI\", then return every new comment with its file, line, quoted text, context and " +
-      "thread history, plus referenced @files and #tags. Ends the previous round. Returns {status:\"timeout\"} after " +
+      "thread history, plus referenced @files and #tags, and the user's standing `instruction` for the round if they set one " +
+      "(it overrides the default of editing the files; follow it). Ends the previous round. Returns {status:\"timeout\"} after " +
       "timeout_seconds; then call it again to keep listening. This blocks for minutes, so make sure the UI url is already " +
       "in a chat message before you call it.",
     inputSchema: {

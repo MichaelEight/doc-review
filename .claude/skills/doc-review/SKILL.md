@@ -36,7 +36,13 @@ So the order is always: call `review_open`, **write the `url` out in a chat mess
 2. Write the `url` in the chat, as above.
 3. `review_wait()` blocks until they press Send. On `{status: "timeout"}` call it again. Don't
    tell the user each time; keep listening quietly.
-4. For every entry in `comments`:
+4. If the result has an `instruction`, the user set it once for the whole round so each comment
+   can be a bare label ("todo", "important name", "sounds like AI"). Read it first and apply it to
+   every comment; it overrides the default "edit the file" below wherever they conflict (e.g.
+   "don't edit, collect to a file" means: leave the commented files alone and write to
+   `instruction.target_abs_path`, creating it if `target_exists` is false). A comment that
+   explicitly asks for something else still wins for that comment.
+5. For every entry in `comments`:
    - Read `quote`, `line`, `context_before`/`context_after` and the whole `messages` thread
      (entries marked `new` are what they just sent). `target: "point"` means "at this spot":
      usually insert something there.
@@ -49,9 +55,9 @@ So the order is always: call `review_open`, **write the `url` out in a chat mess
      - need an answer first: `review_reply(id, text, kind: "question")`. Leave the thread open;
        the answer arrives in a later `review_wait`. Don't guess on anything that matters.
      - explaining without closing: `review_reply(id, text)` (kind `note`).
-5. `review_finish(summary)` with one line about what changed. The UI then shows your diff, and
+6. `review_finish(summary)` with one line about what changed. The UI then shows your diff, and
    the user accepts or reverts each change.
-6. `review_wait()` again for the next round. Stop when the user says they're done in chat.
+7. `review_wait()` again for the next round. Stop when the user says they're done in chat.
 
 ## Slash commands
 
