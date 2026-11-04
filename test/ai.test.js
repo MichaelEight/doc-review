@@ -55,7 +55,8 @@ test("standalone: the built-in AI edits the file, resolves the comment, and the 
     const ws = server.openFolder(dir);
     server.ai.set({ preset: "custom", baseUrl: llm.url, model: "m", apiKey: "sk-secret" });
     assert.ok(!JSON.stringify(server.ai.publicSettings()).includes("sk-secret"));
-    assert.equal(fs.statSync(path.join(process.env.DOC_REVIEW_CONFIG_DIR, "ai.json")).mode & 0o077, 0);
+    // POSIX permission bits mean nothing on Windows; the file lives in the user profile there.
+    if (process.platform !== "win32") assert.equal(fs.statSync(path.join(process.env.DOC_REVIEW_CONFIG_DIR, "ai.json")).mode & 0o077, 0);
 
     const u = new URL(server.http.url(ws));
     const call = (m, p, b) => fetch(`${u.origin}${p}?ws=${ws.id}&t=${u.searchParams.get("t")}`, { method: m, headers: { "content-type": "application/json" }, body: b && JSON.stringify(b) }).then((r) => r.json());
