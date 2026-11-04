@@ -1,14 +1,45 @@
 {
-  "name": "mcp-doc-review",
-  "version": "0.1.0",
-  "description": "MCP server + local web UI: comment on .md/.txt/.tex files Google-Docs-style and hand the comments to the AI.",
+  "name": "doc-review",
+  "version": "0.2.0",
+  "description": "Comment on documents Google-Docs-style and let AI handle your comments. Standalone app with your own AI key, or an MCP server for Claude Code, Cursor and others.",
   "type": "module",
-  "bin": { "mcp-doc-review": "src/server.js" },
-  "scripts": {
-    "start": "node src/server.js",
-    "serve": "node src/server.js --serve",
-    "test": "node --test"
+  "bin": {
+    "doc-review": "bin/doc-review.js"
   },
-  "engines": { "node": ">=18" },
-  "license": "MIT"
+  "files": [
+    "bin",
+    "src",
+    "web",
+    ".claude/skills",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node bin/doc-review.js",
+    "serve": "node src/server.js --serve",
+    "test": "node --test",
+    "app": "electron .",
+    "dist": "electron-builder --config app/electron-builder.yml --publish never"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "review",
+    "markdown",
+    "latex",
+    "comments",
+    "ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelEight/doc-review.git"
+  },
+  "license": "MIT",
+  "main": "app/main.cjs",
+  "devDependencies": {
+    "electron": "^45.2.2",
+    "electron-builder": "^26.18.0"
+  }
 }

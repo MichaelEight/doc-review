@@ -1,19 +1,25 @@
 // Compile a .tex file to PDF for the preview pane. Uses latexmk when present, else pdflatex
 // (twice when the log asks for a rerun). Output goes to <root>/.doc-review/build/. Builds carry
 // SyncTeX data, which maps PDF positions to source lines and back so the PDF can be commented.
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 const TEX_PATHS = ["/Library/TeX/texbin", "/usr/local/texlive/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
-const env = { ...process.env, PATH: [...TEX_PATHS, process.env.PATH].join(":") };
+const env = { ...process.env, PATH: [...(process.platform === "win32" ? [] : TEX_PATHS), process.env.PATH].join(path.delimiter) };
 
+// Finds an executable on PATH without shelling out, so it works the same on macOS, Linux and Windows.
 function which(cmd) {
-  try {
-    return execFileSync("/usr/bin/which", [cmd], { env, encoding: "utf8" }).trim() || null;
-  } catch {
-    return null;
+  const exts = process.platform === "win32" ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""];
+  for (const dir of env.PATH.split(path.delimiter)) {
+    for (const ext of exts) {
+      const p = path.join(dir, cmd + ext.toLowerCase());
+      try {
+        if (fs.statSync(p).isFile()) return p;
+      } catch {}
+    }
   }
+  return null;
 }
 
 const run = (cmd, args, cwd) =>

@@ -57,6 +57,10 @@ export class ReviewHttp {
     throw new Error(`no free port in ${port}..${port + 29}`);
   }
 
+  homeUrl() {
+    return `http://127.0.0.1:${this.port}/?${new URLSearchParams({ t: this.token })}`;
+  }
+
   url(ws, file) {
     const q = new URLSearchParams({ ws: ws.id, t: this.token });
     if (file) q.set("file", file);
@@ -66,10 +70,16 @@ export class ReviewHttp {
   async handle(req, res) {
     const url = new URL(req.url, "http://x");
     try {
+      if (url.pathname === "/" && this.home && !url.searchParams.get("ws")) return this.serveStatic(new URL("/static/home.html", url), res);
       if (url.pathname === "/" || url.pathname.startsWith("/static/")) return this.serveStatic(url, res);
       if (!url.pathname.startsWith("/api/")) return send(res, 404, { error: "not found" });
       const token = req.headers["x-token"] || url.searchParams.get("t");
       if (token !== this.token) return send(res, 403, { error: "bad token" });
+      if (this.home && url.pathname.startsWith("/api/home/")) {
+        if (url.pathname === "/api/home/recent") return send(res, 200, { recent: this.home.recent() });
+        if (url.pathname === "/api/home/open" && req.method === "POST") return send(res, 200, this.home.open(String((await readJson(req)).path ?? "")));
+        return send(res, 404, { error: "not found" });
+      }
       const ws = this.registry.get(url.searchParams.get("ws"));
       if (!ws) return send(res, 404, { error: "unknown workspace (was the agent session closed?)" });
       return await this.api(ws, req, res, url);
@@ -99,6 +109,10 @@ export class ReviewHttp {
         styles: ws.styleRules(), brief: ws.state.brief ?? null, briefPresets: ws.state.briefPresets || [], baselines: Object.keys(ws.baselines), latex: latexAvailable(), synctex: synctexAvailable(), ...ws.status(),
       });
     }
+    if (route === "GET /api/ai" && this.ai) return send(res, 200, this.ai.publicSettings());
+    if (route === "PUT /api/ai" && this.ai) return send(res, 200, (this.ai.set(body), this.ai.publicSettings()));
+    if (route === "POST /api/ai/test" && this.ai) return send(res, 200, await this.ai.test().catch((e) => ({ ok: false, error: e.message })));
+    if (route === "POST /api/ai/stop" && this.ai) return send(res, 200, (this.ai.stop(ws), { ok: true }));
     if (route === "GET /api/events") return this.events(ws, req, res);
     if (route === "GET /api/search") return send(res, 200, { hits: ws.searchText(q("q")) });
     if (route === "GET /api/file") return send(res, 200, ws.readFile(q("path")));

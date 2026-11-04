@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Doc Review</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf9f6;--ink:#1f1d1a;--mute:#6f6a62;--line:#e4e0d8;--acc:#3b6fd6}
+@media(prefers-color-scheme:dark){:root{--bg:#1a1917;--ink:#ece9e3;--mute:#9a958c;--line:#33312d;--acc:#7aa2f0}}
+body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink);display:grid;place-items:center;min-height:100vh}
+main{width:min(560px,92vw)}h1{font-size:28px;margin:0 0 4px}p{color:var(--mute);margin:0 0 24px}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:28px;text-align:center;margin-bottom:16px}
+.drop.over{border-color:var(--acc)}
+button,input{font:inherit;border-radius:9px;border:1px solid var(--line);padding:10px 14px;background:transparent;color:inherit}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;cursor:pointer}
+.row{display:flex;gap:8px}.row input{flex:1}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:28px 0 8px}
+.recent button{display:block;width:100%;text-align:left;margin-bottom:6px;cursor:pointer}
+#err{color:#c0392b;min-height:1.4em;margin-top:10px}
+a{color:var(--acc)}
+</style></head><body><main>
+<h1>Doc Review</h1>
+<p>Pick a folder with your documents (.md, .txt, .tex). Comment on them like in Google Docs, then let the AI handle your comments.</p>
+<div class="drop" id="drop">
+  <button class="primary" id="choose" hidden>Choose a folder…</button>
+  <div id="hint">Paste the folder's path below, or drag a folder here.</div>
+</div>
+<div class="row"><input id="path" placeholder="/Users/you/Documents/thesis" spellcheck="false"><button class="primary" id="go">Open</button></div>
+<div id="err"></div>
+<h2>Recent folders</h2><div class="recent" id="recent"><span style="color:var(--mute)">None yet.</span></div>
+<h2>AI</h2><p style="margin:0">Comments are handled by an AI you connect once: <a id="settings" href="#">AI settings</a>. No account with us, nothing leaves your computer except what you send to your AI provider.</p>
+</main>
+<script>
+const T=new URLSearchParams(location.search).get("t");
+const api=(p,b)=>fetch(p+"?t="+T,{method:b?"POST":"GET",headers:{"content-type":"application/json"},body:b&&JSON.stringify(b)}).then(r=>r.json().then(j=>r.ok?j:Promise.reject(new Error(j.error))));
+const $=id=>document.getElementById(id);
+async function open(p){ $("err").textContent=""; try{ const r=await api("/api/home/open",{path:p}); location.href=r.url; }catch(e){ $("err").textContent=e.message; } }
+$("go").onclick=()=>open($("path").value.trim()); $("path").onkeydown=e=>e.key==="Enter"&&$("go").click();
+api("/api/home/recent").then(({recent})=>{ if(!recent.length)return; $("recent").innerHTML=""; for(const d of recent){const b=document.createElement("button");b.textContent=d;b.onclick=()=>open(d);$("recent").append(b);} });
+if(window.docReviewApp){ $("choose").hidden=false; $("hint").textContent="or drag a folder here"; $("choose").onclick=async()=>{const d=await window.docReviewApp.chooseFolder(); if(d)open(d);}; }
+const drop=$("drop");
+drop.ondragover=e=>{e.preventDefault();drop.classList.add("over")};drop.ondragleave=()=>drop.classList.remove("over");
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove("over");const f=e.dataTransfer.files[0];const p=f&&(window.docReviewApp?.pathOf(f));if(p)open(p);else $("err").textContent="Dragging works in the desktop app. Here, paste the folder path instead.";};
+$("settings").onclick=e=>{e.preventDefault();location.href="/static/settings.html?t="+T;};
+</script></body></html>

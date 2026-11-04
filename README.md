@@ -1,44 +1,99 @@
-# mcp-doc-review
+# Doc Review
 
-Review documents with an AI the way you would with a colleague in Google Docs. Open a folder,
-read a `.md` / `.txt` / `.tex` file in a clean local web page, select text (or click any spot) and
-leave margin comments, then press **Send to AI**. The agent that opened the page gets every
-comment with its location and context. It edits the files, then answers in each thread
-("Corrected", "Yeah, that's right") or asks you a question there. You review its changes as a
+Comment on your documents the way you do in Google Docs, then let an AI handle your comments.
+Open a folder, read a `.md` / `.txt` / `.tex` file in a clean page, select text, leave a margin comment,
+press **Send to AI**. The AI edits the files and answers in each thread; you review its changes as a
 diff and accept or revert each one.
 
-- **Server** (`src/`): MCP over stdio, plus a local HTTP UI on `127.0.0.1`. Zero dependencies,
-  Node 18+.
-- **UI** (`web/`): vanilla JS. Markdown is rendered with source positions so comments anchor to
-  exact text. KaTeX for math loads from jsDelivr; without it, math shows as source.
-- **Skill** (`.claude/skills/doc-review/SKILL.md`): the review loop for the agent.
-- **Data**: `<workspace>/.doc-review/comments.json` (threads, rounds, tags, display rules) and
-  `baselines.json` (what the diff compares against). Add `.doc-review/` to the workspace's
-  `.gitignore` unless you want to keep the review history.
-- **Token**: the UI link carries a secret kept in `~/.config/doc-review/token` (mode 600;
-  override with `DOC_REVIEW_TOKEN_FILE`). It survives restarts, so open tabs keep working; delete
-  the file to revoke old links.
+Free, open source (MIT). No account, no telemetry, nothing is uploaded except what you send to the AI
+provider you choose. Your files stay on your computer.
 
-## Setup
+## Two ways to use it
+
+| | Who it is for | AI |
+|---|---|---|
+| **Desktop app** | Anyone. Download, double-click, done. | You connect your own: an API key, or a free model running on your computer |
+| **MCP server** | Claude Code, Claude Desktop, Cursor and other MCP clients | The AI you already use in that tool |
+
+## Desktop app (no technical knowledge needed)
+
+1. Go to the [Releases page](https://github.com/MichaelEight/doc-review/releases/latest) and download
+   `Doc Review` for your computer: the `.dmg` for Mac, the `.exe` for Windows.
+2. Install it. The app is not signed yet, so your computer will warn you once:
+   - **Mac:** open the `.dmg`, drag Doc Review to Applications, then **right-click it, choose Open**, and
+     click Open again.
+   - **Windows:** if "Windows protected your PC" appears, click **More info**, then **Run anyway**.
+3. Open it, choose the folder with your documents.
+4. Click **AI not set up** (top right), pick a provider, paste your key, press **Test connection**.
+
+Where to get an AI key: [OpenAI](https://platform.openai.com/api-keys),
+[Anthropic](https://console.anthropic.com/settings/keys) or [OpenRouter](https://openrouter.ai/keys).
+A ChatGPT or Claude *chat subscription* is not an API key; the API is billed separately, by use. Free
+option: install [Ollama](https://ollama.com), pick "Ollama" in the settings. Quality depends on the model.
+
+The AI can read and edit only files in the folder you opened, and only with exact find-and-replace edits.
+It cannot run programs or browse the web. Every change shows up in the **Changes** view, where you can
+revert it. Settings include a per-round spending limit, and the pill has a Stop button while it works.
+
+## MCP server (Claude Code, Cursor, others)
+
+Needs [Node.js](https://nodejs.org) 18 or newer.
 
 ```bash
-claude mcp add --scope user doc-review -- node /Users/michaeleight/Coding/MCP/mcp-doc-review/src/server.js
-ln -s /Users/michaeleight/Coding/MCP/mcp-doc-review/.claude/skills/doc-review ~/.claude/skills/doc-review
+claude mcp add --scope user doc-review -- npx -y doc-review --mcp
 ```
 
-LaTeX preview needs `latexmk` or `pdflatex` (MacTeX / BasicTeX: `brew install --cask basictex`,
-~100 MB). Without one, the PDF tab is hidden. Comments on the PDF also need `synctex` (it ships with
-TeX Live and BasicTeX): it maps a spot in the PDF to its source line, and the selected words are
-then matched in that line, so a comment on rendered math lands on the LaTeX that produced it.
-The PDF is drawn with PDF.js from jsDelivr.
+Other MCP clients: add this to their config.
 
-UI only, no agent (comments queue until an agent calls `review_wait` on the same folder):
+```json
+{ "mcpServers": { "doc-review": { "command": "npx", "args": ["-y", "doc-review", "--mcp"] } } }
+```
+
+Optional skill (teaches Claude Code the review loop; the server's own instructions already cover the basics):
 
 ```bash
-node src/server.js --serve ~/path/to/folder
+mkdir -p ~/.claude/skills && cp -r "$(npm root -g)/doc-review/.claude/skills/doc-review" ~/.claude/skills/
+```
+
+Then ask your AI: "open this folder in doc-review". The AI gets a link; you comment; **Send to AI** delivers
+the comments to it. When an MCP agent has a folder open, it takes priority over the built-in AI.
+
+## Run from a terminal (no desktop app)
+
+```bash
+npx doc-review ~/path/to/folder      # standalone, with the built-in AI
+npx doc-review --serve ~/path/to/folder   # UI only; comments wait for an MCP agent
 ```
 
 `DOC_REVIEW_PORT` sets the first port to try (default 4848).
+
+## Known limits
+
+- **Not signed yet.** Hence the one-time warning on install. Signing needs a paid Apple developer account
+  and a Windows certificate; planned.
+- **API key is stored in plain text** in `~/.config/doc-review/ai.json` (readable only by you), not in the
+  system keychain. It is never sent to the browser page or written into your documents' folder.
+- **Needs internet for maths and PDF.** KaTeX and PDF.js load from a CDN. Without it, maths shows as source
+  and PDF preview does not work. Bundling them is planned.
+- **Word files (`.docx`) are not supported yet.** See [PLAN-standalone.md](PLAN-standalone.md).
+- **LaTeX preview** needs `latexmk` or `pdflatex` installed (MacTeX / BasicTeX / MiKTeX). Without it the
+  PDF tab is hidden; commenting on the source works.
+- **Tested on macOS.** Windows and Linux are covered by automated tests in CI but have had no manual testing.
+
+## How it works
+
+- **Server** (`src/`): MCP over stdio, plus a local HTTP UI on `127.0.0.1`. Zero runtime dependencies,
+  Node 18+. `src/ai.js` is the built-in AI: it waits for **Send** like an MCP agent would, then runs a
+  tool-calling loop against any OpenAI-compatible `/chat/completions` endpoint.
+- **UI** (`web/`): vanilla JS. Markdown is rendered with source positions so comments anchor to exact text.
+- **Desktop app** (`app/`): a thin Electron window around the same server, plus a native folder picker.
+  Build locally with `npm install && npm run dist`; releases are built by GitHub Actions on `v*` tags.
+- **Skill** (`.claude/skills/doc-review/SKILL.md`): the review loop for MCP agents.
+- **Data**: `<folder>/.doc-review/comments.json` (threads, rounds, tags, display rules) and `baselines.json`
+  (what the diff compares against). Add `.doc-review/` to the folder's `.gitignore` unless you want to keep
+  the review history.
+- **Token**: the UI link carries a secret kept in `~/.config/doc-review/token` (mode 600; override with
+  `DOC_REVIEW_TOKEN_FILE`). Delete the file to revoke old links.
 
 ## Using it
 

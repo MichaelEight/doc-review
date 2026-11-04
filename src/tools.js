@@ -2,7 +2,7 @@
 // user presses "Send to AI" in the browser (or the timeout passes).
 import path from "node:path";
 import fs from "node:fs";
-import { execFile } from "node:child_process";
+import { openUrl } from "./open.js";
 import { Workspace, workspaceId } from "./workspace.js";
 import { makeAnchor } from "../web/anchor.js";
 
@@ -246,8 +246,8 @@ export function makeHandlers(registry, http) {
       await http.listen();
       const url = http.url(ws, isFile ? ws.rel(abs) : null);
       ws.uiUrl = http.url(ws);
-      if (open_browser && process.platform === "darwin") execFile("open", [url], () => {});
-      else if (open_browser && process.platform === "linux") execFile("xdg-open", [url], () => {});
+      http.ai?.detach(ws);
+      if (open_browser) openUrl(url);
       const open = ws.state.threads.filter((t) => t.status === "open").length;
       return { url, root: ws.root, files: ws.listFiles().filter((f) => f.editable).length, open_comments: open, ...ws.status(),
         next: "Write the url out in a chat message FIRST, on its own line, as the literal address. Only then call " +

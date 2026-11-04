@@ -259,6 +259,17 @@ function connectEvents() {
 
 function setStatus(st) {
   const pill = $("agentPill");
+  if (!pill.dataset.wired) {
+    pill.dataset.wired = "1";
+    pill.style.cursor = "pointer";
+    // Standalone app: the pill is the way to the AI settings, and to stopping a running round.
+    pill.addEventListener("click", async () => {
+      if (S.aiWorking && S.builtinAi) {
+        if (confirm("Stop the AI?")) await api("POST", "/api/ai/stop");
+      } else if (S.standalone) window.open(`/static/settings.html?t=${encodeURIComponent(TOKEN)}&ws=${WS}`, "_blank");
+    });
+  }
+  S.standalone = !!st.standalone;
   pill.className = "agent-pill";
   // Four states, from the server's point of view:
   //   editing    the AI received your comments and has not finished the round
@@ -269,6 +280,7 @@ function setStatus(st) {
     : st.aiWorking ? ["working", "AI editing", "The AI is working on the comments you sent. Editing is paused until it finishes."]
     : st.agentWaiting ? ["listening", "AI listening", "The AI is waiting. Send to AI delivers your comments right away."]
     : st.agentAttached ? ["away", "AI away", "An AI session has this folder open but is not waiting for comments right now. Anything you send is queued and delivered when it listens again."]
+    : st.standalone ? ["", "AI not set up", "Click to connect an AI in settings. Until then, comments are saved and wait."]
     : ["", "No AI session", "This page was opened without an AI. Comments you send are saved in the folder and delivered when an AI opens it with doc-review."];
   if (cls) pill.classList.add(cls);
   pill.querySelector("span").textContent = label;
@@ -277,6 +289,7 @@ function setStatus(st) {
   const wasWorking = S.aiWorking;
   S.aiWorking = !!st.aiWorking;
   S.agentWaiting = !!st.agentWaiting;
+  S.builtinAi = !!st.builtinAi;
   S.pending = st.pending ?? 0;
   $("sendCount").textContent = S.pending ? String(S.pending) : "";
   $("sendBtn").disabled = !S.pending;

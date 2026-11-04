@@ -1,6 +1,8 @@
 # Plan: standalone Doc Review
 
-Status: planned, not started (2026-11-04). Nothing below is built yet.
+Status (2026-11-04): phases 1, 2 (partly), 6 (basic) and 7 (built-in AI) are built; see git history.
+Not done: npm publish, `.docx` support (phases 4-5), bundled KaTeX/PDF.js, signed installers, manual
+Windows testing. The text below is the original plan.
 
 Extract `mcp-doc-review` from the `cc-mcp-skill` monorepo into its own project, so people without
 Claude Code or Claude Desktop can use it, including non-technical users such as PhD students.

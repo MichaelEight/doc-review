@@ -204,6 +204,8 @@ export class Workspace {
     return {
       aiWorking: this.aiWorking,
       agentAttached: this.agentAttached,
+      builtinAi: Boolean(this.builtinAi),
+      standalone: Boolean(this.standalone),
       agentWaiting: this.waiters.length > 0,
       pending: this.state.threads.filter((t) => t.messages.some((m) => m.state === "pending")).length,
       lastSummary: this.lastSummary,

@@ -1,0 +1,22 @@
+appId: com.michaeleight.docreview
+productName: Doc Review
+directories:
+  output: dist
+files:
+  - app/main.cjs
+  - app/preload.cjs
+  - bin/**
+  - src/**
+  - web/**
+  - package.json
+  - LICENSE
+mac:
+  category: public.app-category.productivity
+  target:
+    - { target: dmg, arch: [arm64, x64] }
+win:
+  target:
+    - { target: nsis, arch: [x64] }
+nsis:
+  oneClick: true
+  perMachine: false

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Doc Review: AI settings</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf9f6;--ink:#1f1d1a;--mute:#6f6a62;--line:#e4e0d8;--acc:#3b6fd6}
+@media(prefers-color-scheme:dark){:root{--bg:#1a1917;--ink:#ece9e3;--mute:#9a958c;--line:#33312d;--acc:#7aa2f0}}
+body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink);display:grid;place-items:center;min-height:100vh}
+main{width:min(560px,92vw);padding:24px 0}h1{font-size:26px;margin:0 0 4px}p.s{color:var(--mute);margin:0 0 20px}
+label{display:block;font-size:13px;color:var(--mute);margin:14px 0 4px}
+input,select,button{font:inherit;width:100%;box-sizing:border-box;border-radius:9px;border:1px solid var(--line);padding:10px 12px;background:transparent;color:inherit}
+.row{display:flex;gap:8px;margin-top:20px}button{cursor:pointer}button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+#msg{margin-top:14px;min-height:1.4em}.ok{color:#2e8b57}.bad{color:#c0392b}
+small{color:var(--mute)}a{color:var(--acc)}
+</style></head><body><main>
+<h1>AI settings</h1>
+<p class="s">Doc Review has no AI of its own. Connect one you already pay for, or run a free one on your computer. Your key stays on this computer.</p>
+<label>Provider</label><select id="preset"></select>
+<label>API key <small id="keyNote"></small></label><input id="key" type="password" placeholder="Paste your key" autocomplete="off" spellcheck="false">
+<label>Model</label><input id="model" spellcheck="false">
+<label>Address <small>(only change for "Other")</small></label><input id="base" spellcheck="false">
+<label>Spending limit per round <small>(tokens)</small></label><input id="max" type="number" min="1000" step="1000">
+<div class="row"><button id="test">Test connection</button><button class="primary" id="save">Save</button></div>
+<div id="msg"></div>
+<p class="s" style="margin-top:24px"><small>Where to get a key: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">OpenAI</a> · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Anthropic</a> · <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter</a>. A ChatGPT or Claude chat subscription is not an API key; the API is billed separately. Free option: install <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>.</small></p>
+<p class="s"><a href="#" id="back">← Back</a></p>
+</main>
+<script>
+const qs=new URLSearchParams(location.search),T=qs.get("t"),WS=qs.get("ws");
+const api=(m,p,b)=>fetch(p+"?t="+T+(WS?"&ws="+WS:""),{method:m,headers:{"content-type":"application/json"},body:b&&JSON.stringify(b)}).then(r=>r.json());
+const $=id=>document.getElementById(id);let S;
+const say=(t,c)=>{$("msg").textContent=t;$("msg").className=c||""};
+function fill(){ $("preset").value=S.preset;$("model").value=S.model;$("base").value=S.baseUrl;$("max").value=S.maxTokens;
+  const p=S.presets.find(x=>x.id===S.preset); $("keyNote").textContent=S.hasKey?"(saved; leave empty to keep)":p?.noKey?"(not needed)":""; }
+api("GET","/api/ai").then(s=>{S=s;for(const p of s.presets){const o=document.createElement("option");o.value=p.id;o.textContent=p.label;$("preset").append(o);}fill();});
+$("preset").onchange=()=>{const p=S.presets.find(x=>x.id===$("preset").value);S.preset=p.id;if(p.id!=="custom"){S.baseUrl=p.baseUrl;S.model=p.model;}fill();};
+const body=()=>({preset:$("preset").value,baseUrl:$("base").value,model:$("model").value,apiKey:$("key").value,maxTokens:Number($("max").value)});
+$("save").onclick=async()=>{S=await api("PUT","/api/ai",body());$("key").value="";fill();say(S.configured?"Saved. The AI will handle your comments when you press Send.":"Saved, but a key is still missing.",S.configured?"ok":"bad");};
+$("test").onclick=async()=>{say("Testing…");S=await api("PUT","/api/ai",body());$("key").value="";fill();const r=await api("POST","/api/ai/test");say(r.ok?"Connected.":"Failed: "+r.error,r.ok?"ok":"bad");};
+$("back").onclick=e=>{e.preventDefault();history.length>1?history.back():location.href="/?t="+T;};
+</script></body></html>

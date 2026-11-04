@@ -9,6 +9,21 @@ The user reads the file in a local web page, selects text (or clicks a spot) and
 margin. Nothing reaches you until they press **Send to AI**. You get all the comments together,
 make the edits, and answer each comment in its thread.
 
+## Default: run the loop in a background subagent
+
+`review_wait` blocks for minutes, and a blocked main thread cannot talk to the user. So by default
+the main thread only opens the review and writes out the link; a background subagent does
+everything from `review_wait` on: waiting, editing the files, answering in the threads,
+`review_finish`, and waiting again. The main thread stays free for the conversation.
+
+- Main thread: `review_open`, write the `url` in the chat, start the subagent in the background.
+- Give the subagent a self-contained prompt: the workspace root, the `url`, the document's
+  purpose, any constraints agreed so far, and the instruction to follow this skill's loop until
+  told to stop. It has none of this conversation's context unless you pass it.
+- If the host cannot run background subagents, run the loop in the main thread as described below.
+
+Run it in the main thread only when the user asks for that.
+
 ## Always give the user the link, in the chat, first
 
 `review_wait` blocks for minutes. Anything you write after calling it reaches the user when the
