@@ -37,22 +37,26 @@ revert it. Settings include a per-round spending limit, and the pill has a Stop 
 
 ## MCP server (Claude Code, Cursor, others)
 
-Needs [Node.js](https://nodejs.org) 18 or newer.
+Needs [Node.js](https://nodejs.org) 18+ and git. Download once, then register it (two lines):
 
 ```bash
-claude mcp add --scope user doc-review -- npx -y doc-review --mcp
+git clone https://github.com/MichaelEight/doc-review.git ~/doc-review
+claude mcp add --scope user doc-review -- node ~/doc-review/bin/doc-review.js --mcp
 ```
 
-Other MCP clients: add this to their config.
+No git? Download the ZIP from the green **Code** button, unzip it, and use that folder's path instead of
+`~/doc-review`. Update later with `git -C ~/doc-review pull`.
+
+Other MCP clients: add this to their config (use the full path, not `~`).
 
 ```json
-{ "mcpServers": { "doc-review": { "command": "npx", "args": ["-y", "doc-review", "--mcp"] } } }
+{ "mcpServers": { "doc-review": { "command": "node", "args": ["/full/path/to/doc-review/bin/doc-review.js", "--mcp"] } } }
 ```
 
 Optional skill (teaches Claude Code the review loop; the server's own instructions already cover the basics):
 
 ```bash
-mkdir -p ~/.claude/skills && cp -r "$(npm root -g)/doc-review/.claude/skills/doc-review" ~/.claude/skills/
+ln -s ~/doc-review/.claude/skills/doc-review ~/.claude/skills/doc-review
 ```
 
 Then ask your AI: "open this folder in doc-review". The AI gets a link; you comment; **Send to AI** delivers
@@ -61,8 +65,8 @@ the comments to it. When an MCP agent has a folder open, it takes priority over 
 ## Run from a terminal (no desktop app)
 
 ```bash
-npx doc-review ~/path/to/folder      # standalone, with the built-in AI
-npx doc-review --serve ~/path/to/folder   # UI only; comments wait for an MCP agent
+node ~/doc-review/bin/doc-review.js ~/path/to/folder          # standalone, with the built-in AI
+node ~/doc-review/bin/doc-review.js --serve ~/path/to/folder  # UI only; comments wait for an MCP agent
 ```
 
 `DOC_REVIEW_PORT` sets the first port to try (default 4848).
@@ -73,8 +77,7 @@ npx doc-review --serve ~/path/to/folder   # UI only; comments wait for an MCP ag
   and a Windows certificate; planned.
 - **API key is stored in plain text** in `~/.config/doc-review/ai.json` (readable only by you), not in the
   system keychain. It is never sent to the browser page or written into your documents' folder.
-- **Needs internet for maths and PDF.** KaTeX and PDF.js load from a CDN. Without it, maths shows as source
-  and PDF preview does not work. Bundling them is planned.
+- **Works offline** except for the AI call itself: KaTeX and PDF.js are bundled in `web/vendor/` (see `THIRD-PARTY-NOTICES.md`).
 - **Word files (`.docx`) are not supported yet.** See [PLAN-standalone.md](PLAN-standalone.md).
 - **LaTeX preview** needs `latexmk` or `pdflatex` installed (MacTeX / BasicTeX / MiKTeX). Without it the
   PDF tab is hidden; commenting on the source works.

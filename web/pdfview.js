@@ -2,7 +2,7 @@
 // marks layer in between for comment highlights. Positions are exchanged in PDF big points from
 // the page's top-left, the unit SyncTeX uses, so callers never deal with screen pixels.
 
-const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/";
+const PDFJS = "/static/vendor/pdfjs/";
 let lib = null;
 
 function loadLib() {
@@ -10,14 +10,13 @@ function loadLib() {
   lib = new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = PDFJS + "pdf.min.js";
-    s.crossOrigin = "anonymous";
     s.onload = () => {
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js";
       resolve(window.pdfjsLib);
     };
     s.onerror = () => {
       lib = null;
-      reject(new Error("Could not load PDF.js (offline?)"));
+      reject(new Error("Could not load PDF.js "));
     };
     document.head.append(s);
   });
