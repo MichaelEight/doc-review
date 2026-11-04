@@ -41,6 +41,20 @@ Then ask: "open this folder in doc-review".
 | Same request on every comment | **Instruction** button next to Send |
 | LaTeX preview | **PDF** tab (needs `pdflatex` installed) |
 
+## Shortcuts
+
+| Action | Mac | Windows |
+|---|---|---|
+| Send to AI | ⌘ ⇧ ↵ | Ctrl Shift Enter |
+| Add comment on selection | ⌘ ⌥ M | Ctrl Alt M |
+| Post reply | ⌘ ↵ | Ctrl Enter |
+| Search files and text | ⌘ K | Ctrl K |
+| Jump to heading | ⌘ ⇧ O | Ctrl Shift O |
+| Previous / next comment | ⌥ , and ⌥ . | Alt , and Alt . |
+| Switch tab 1–9 / close tab | ⌥ 1–9 / ⌥ W | Alt 1–9 / Alt W |
+| Bold / italic / underline | ⌘ B / I / U | Ctrl B / I / U |
+| Undo | ⌘ Z | Ctrl Z |
+
 ## Limits
 
 - Not signed yet. No `.docx` yet.
