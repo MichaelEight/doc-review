@@ -3,6 +3,10 @@
 Comment on documents like in Google Docs, then let AI handle your comments.
 Works with `.md`, `.txt`, `.tex`. Free, open source, runs on your computer.
 
+![Comments: one resolved by the AI, one waiting to be sent](docs/comments.png)
+
+![Changes tab: the AI's edits before and after, with Accept and Revert](docs/changes.png)
+
 ## Install
 
 **Desktop app** (anyone): download from [Releases](https://github.com/MichaelEight/doc-review/releases/latest) (`.dmg` Mac, `.exe` Windows), open it, pick a folder.
