@@ -31,7 +31,7 @@ Then ask: "open this folder in doc-review".
 
 1. Select text, click **Comment** (or click a spot, then **+**).
 2. Press **Send to AI** (⌘⇧↵).
-3. Review the edits in the **Changes** tab: Accept or Revert.
+3. Review the edits in the **Changes** tab: Accept, Edit or Revert.
 
 | Do | How |
 |---|---|

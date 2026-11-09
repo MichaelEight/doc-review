@@ -40,6 +40,7 @@ const ICON = {
   // Both stars together are centred on the 24px box, so the glyph sits in the middle of round avatars.
   spark: '<svg viewBox="0 0 24 24"><path d="M10.5 3.5l1.8 5.2 5.2 1.8-5.2 1.8-1.8 5.2-1.8-5.2-5.2-1.8 5.2-1.8z"/><path d="M18 15.2l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>',
   expand: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
@@ -1980,10 +1981,13 @@ function acKeydown(e) {
 function renderChanges() {
   const box = $("changes");
   if (!hasChanges()) return box.replaceChildren();
+  // Leave a change that is being edited alone, so a background refresh does not eat the user's typing.
+  if (box.dataset.editFile === S.file && box.querySelector(".hunk-edit")) return;
+  delete box.dataset.editFile;
   const hunks = diffLines(S.baseline, S.text);
   const lines = splitLines(S.text);
   const kids = [h("div", { class: "changes-head" },
-    h("div", { style: "flex:1" }, h("h3", {}, `${hunks.length} change${hunks.length === 1 ? "" : "s"} by the AI`), h("p", {}, "Hover a change to accept or revert it. Accepted changes stay; reverted ones go back to your text.")),
+    h("div", { style: "flex:1" }, h("h3", {}, `${hunks.length} change${hunks.length === 1 ? "" : "s"} by the AI`), h("p", {}, "Hover a change to accept, edit or revert it. Accepted changes stay; reverted ones go back to your text.")),
     h("button", { class: "btn small", html: ICON.undo + "<span>Revert all</span>", onclick: () => revertAll() }),
     h("button", { class: "btn primary small", html: ICON.check + "<span>Accept all</span>", onclick: () => acceptAll() }))];
   const CTX = 3;
@@ -2010,6 +2014,7 @@ function renderChanges() {
     const el = h("div", { class: "hunk" },
       h("div", { class: "hunk-bar" },
         h("button", { class: "btn small", html: ICON.undo + "<span>Revert</span>", onclick: () => revertOne(hk, el) }),
+        h("button", { class: "btn small", html: ICON.edit + "<span>Edit</span>", onclick: () => editOne(hk, el, lines) }),
         h("button", { class: "btn primary small", html: ICON.check + "<span>Accept</span>", onclick: () => acceptOne(hk, el) })),
       rows);
     kids.push(el);
@@ -2056,6 +2061,56 @@ async function revertOne(hk, el) {
     toast(err.message);
     renderChanges();
   }
+}
+
+// Edit the AI's version of one change in place. The result is written to the file like any other edit;
+// the baseline stays, so the change keeps showing against the original (and disappears if you restore it).
+function editOne(hk, el, lines) {
+  const box = $("changes");
+  const orig = hk.added.join("");
+  const ta = h("textarea", { class: "hunk-edit", spellcheck: "true", "aria-label": "Edit this change" });
+  ta.value = orig.replace(/\n$/, "");
+  const fit = () => ((ta.style.height = "auto"), (ta.style.height = ta.scrollHeight + 2 + "px"));
+  const close = () => {
+    delete box.dataset.editFile;
+    box.replaceChildren();
+    renderChanges();
+  };
+  const save = async () => {
+    let val = ta.value;
+    if (val && orig.endsWith("\n") && !val.endsWith("\n")) val += "\n";
+    if (val === orig) return close();
+    const next = lines.slice(0, hk.bStart).join("") + val + lines.slice(hk.bEnd).join("");
+    try {
+      const r = await api("PUT", "/api/file", { path: S.file, text: next, baseHash: S.hash });
+      S.hash = r.hash;
+      const map = offsetMapper(S.text, next);
+      for (const [id, rr] of S.live) S.live.set(id, mapRange(map, rr.start, rr.end));
+      S.text = next;
+      if (S.baseline === next) S.baseline = null;
+      delete box.dataset.editFile;
+      box.replaceChildren();
+      afterReview();
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+  ta.addEventListener("input", fit);
+  ta.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") return e.preventDefault(), e.stopPropagation(), close();
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) return e.preventDefault(), save();
+  });
+  box.dataset.editFile = S.file;
+  el.classList.add("editing");
+  el.replaceChildren(
+    ...hk.removed.map((l) => lineEl(l, "del")),
+    h("div", { class: "hunk-edit-box" }, ta,
+      h("div", { class: "hunk-edit-bar" },
+        h("span", {}, "Edit the AI's version. Ctrl/⌘ Enter to save, Esc to cancel."),
+        h("button", { class: "btn small", onclick: close }, "Cancel"),
+        h("button", { class: "btn primary small", html: ICON.check + "<span>Save</span>", onclick: save }))));
+  fit();
+  ta.focus();
 }
 
 async function acceptAll() {
