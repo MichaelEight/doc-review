@@ -548,7 +548,9 @@ body.has-tabs .tabs { display: flex; }
 .doc-col { width: min(var(--col-w), 100%); flex: none; position: relative; }
 .margin { width: var(--margin-w); flex: none; position: relative; }
 body.mode-changes .margin { display: none; }
-body.mode-pdf .doc-col { width: min(860px, 100%); }
+body.mode-pdf .doc-col { width: var(--pdf-w, 860px); }
+body.mode-pdf .page { justify-content: safe center; }
+body.mode-pdf .margin { position: sticky; right: 0; }
 body.mode-pdf .page { padding: 20px 28px; }
 
 .doc, .src, .changes, .pdf, .empty { display: none; }
@@ -765,6 +767,14 @@ img.hl-ai, .math.hl-ai { outline-color: var(--hl-ai-line); }
 @keyframes card-in { from { opacity: 0; translate: 10px 0; } }
 .card:hover { box-shadow: var(--shadow-2); }
 .card.on { box-shadow: var(--shadow-2); border-color: var(--line-2); cursor: default; z-index: 3; translate: -14px 0; transition: transform 0.32s var(--ease), translate 0.32s var(--ease), box-shadow 0.25s; }
+/* With a comment active, the rest recede: smaller, dimmer, one short message each. */
+body.has-active .card:not(.on):not(.draft) { opacity: 0.5; padding: 9px 14px; }
+body.has-active .card:not(.on):not(.draft):hover { opacity: 0.95; }
+body.has-active .card:not(.on):not(.draft) .msg-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+body.has-active .card:not(.on):not(.draft) .msg.reply, body.has-active .card:not(.on):not(.draft) .card-quote { display: none; }
+.card.on { border-color: var(--accent); box-shadow: var(--shadow-2), 0 0 0 1px var(--accent); }
+body.has-active .hl:not(.on) { opacity: 0.4; }
+.hl.on { box-shadow: 0 2px 0 var(--accent), 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 .card.resolved:not(.on) { opacity: 0.62; padding: 9px 14px; }
 .card.resolved:not(.on) .msg:not(:last-child), .card.resolved:not(.on) .card-quote { display: none; }
 .card.question { border-left: 3px solid var(--hl-q-line); }
@@ -888,7 +898,7 @@ img.hl-ai, .math.hl-ai { outline-color: var(--hl-ai-line); }
 .modal-body { padding: 14px 20px; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 14px; }
 .bubble { max-width: 88%; padding: 10px 14px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); animation: card-in 0.25s var(--ease) both; }
 .bubble.me { align-self: flex-end; background: var(--accent-soft); border-color: transparent; }
-.bubble.ai { align-self: flex-start; }
+.bubble.ai { }
 .bubble .msg-who { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; margin-bottom: 4px; color: var(--ink-2); }
 .bubble .msg-who time { color: var(--muted); font-weight: 400; }
 .modal-foot { padding: 12px 18px 16px; border-top: 1px solid var(--line); }
@@ -1299,3 +1309,74 @@ img.hl-ai, .math.hl-ai { outline-color: var(--hl-ai-line); }
 }
 .comment-nav.on { display: flex; }
 .comment-nav-count { width: 66px; text-align: center; font: 600 12.5px var(--ui); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+
+/* ---------- position counter (page / line) ---------- */
+
+.pos {
+  position: fixed;
+  right: 24px;
+  bottom: 20px;
+  z-index: 25;
+  display: none;
+  align-items: baseline;
+  gap: 5px;
+  padding: 6px 12px 6px 11px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+  font: 600 12.5px var(--ui);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  transition: bottom 0.18s var(--ease);
+}
+.pos.on { display: flex; }
+body:has(.comment-nav.on) .pos { bottom: 66px; }
+.pos-unit { font-weight: 500; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.pos-total { color: var(--muted); font-weight: 500; white-space: nowrap; }
+.pos input {
+  width: calc(var(--digits, 1) * 1ch + 10px);
+  min-width: 22px;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  text-align: center;
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.pos input:hover { border-color: var(--line-2); }
+.pos input:focus { border-color: var(--accent); background: var(--bg); }
+.pos input::placeholder { color: var(--muted); }
+
+/* ---------- find in file ---------- */
+
+.find-anchor { position: relative; height: 0; z-index: 30; }
+.find {
+  position: absolute;
+  top: 10px;
+  right: 28px;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 4px 4px 10px;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+}
+.find.on { display: flex; animation: card-in 0.14s var(--ease) both; }
+.find-icon { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2.2; stroke-linecap: round; margin-right: 4px; }
+.find input { width: 210px; border: 0; background: transparent; outline: none; font: 13.5px var(--ui); color: var(--ink); padding: 4px 2px; }
+.find-count { min-width: 64px; text-align: right; padding-right: 6px; font: 500 12px var(--ui); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.find.none .find-count { color: #c2410c; }
+.find #findCase b { font: 700 11.5px var(--ui); color: var(--muted); }
+.find #findCase[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.find #findCase[aria-pressed="true"] b { color: var(--accent); }
+::highlight(find-hit) { background-color: color-mix(in srgb, #f5b301 34%, transparent); }
+::highlight(find-cur) { background-color: #f5b301; color: #1a1a1a; }
+/* Over the PDF the text layer is invisible and the glyphs are on the canvas below: tint, don't cover. */
+.textLayer ::highlight(find-hit) { color: transparent; background-color: color-mix(in srgb, #f5b301 30%, transparent); }
+.textLayer ::highlight(find-cur) { color: transparent; background-color: color-mix(in srgb, #f59e0b 55%, transparent); }

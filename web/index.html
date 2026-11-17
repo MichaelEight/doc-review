@@ -116,6 +116,23 @@
     </aside>
     <div class="main-col">
     <div class="tabs" id="tabs" role="tablist" aria-label="Open files"></div>
+    <div class="find-anchor">
+      <div class="find" id="find" role="search" aria-label="Find in file">
+        <svg class="find-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+        <input id="findInput" placeholder="Find" spellcheck="false" autocomplete="off">
+        <span class="find-count" id="findCount" aria-live="polite"></span>
+        <button class="icon-btn sm" id="findCase" title="Match case" aria-pressed="false"><b>Aa</b></button>
+        <button class="icon-btn sm" id="findPrev" title="Previous match (⇧↵)" aria-label="Previous match">
+          <svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>
+        </button>
+        <button class="icon-btn sm" id="findNext" title="Next match (↵)" aria-label="Next match">
+          <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <button class="icon-btn sm" id="findClose" title="Close (Esc)" aria-label="Close find">
+          <svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>
+        </button>
+      </div>
+    </div>
     <main class="scroller" id="scroller">
       <div class="page" id="page">
         <div class="doc-col" id="docCol">
@@ -153,6 +170,12 @@
     <button class="icon-btn sm" id="nextComment" title="Next comment (⌥.)" aria-label="Next comment">
       <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
     </button>
+  </div>
+
+  <div class="pos" id="pos" title="Type a number and press ↵ to jump (⌃G: go to line)">
+    <span class="pos-unit" id="posUnit">Page</span>
+    <input id="posInput" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Current position">
+    <span class="pos-total" id="posTotal"></span>
   </div>
 
   <div class="palette-backdrop" id="paletteBackdrop"></div>

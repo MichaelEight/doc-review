@@ -958,7 +958,8 @@ function renderView() {
   // Marks before cards: a card with nothing to sit next to would start at the top of the margin.
   if (S.mode === "pdf") paintPdf();
   if (S.mode === "read" || S.mode === "edit" || S.mode === "pdf") renderCards();
-  renderCommentNav();
+  renderCommentNav();  updatePosSoon();
+  refreshFindSoon();
 }
 
 function viewEl() {
@@ -1006,6 +1007,8 @@ function paintBackdrop() {
   wrap.style.minHeight = "";
   sc.scrollTop = top;
   markActive();
+  updatePosSoon();
+  refreshFindSoon();
 }
 
 function updateLock() {
@@ -1546,11 +1549,29 @@ function anchorEl(id) {
   return view.querySelector(`.pin[data-id="${id}"]`) || view.querySelector(`[data-ids~="${id}"]`);
 }
 
+// Viewport-space box around everything a comment points at (a multi-line range counts as one block).
+function anchorBox(id) {
+  const view = viewEl();
+  const els = [...view.querySelectorAll(`.pin[data-id="${id}"], [data-ids~="${id}"]`)];
+  let top = Infinity;
+  let bottom = -Infinity;
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (!r.height) continue;
+    top = Math.min(top, r.top);
+    bottom = Math.max(bottom, r.bottom);
+  }
+  return top === Infinity ? null : { top, bottom };
+}
+
 function layoutCards() {
   const margin = $("margin");
+  const sc = $("scroller").getBoundingClientRect();
   const mtop = margin.getBoundingClientRect().top;
   const det = margin.querySelector(".detached");
   const floor = det ? det.offsetHeight + 12 : 0;
+  // Before measuring: with a comment active the others are compact, so they take less room.
+  document.body.classList.toggle("has-active", !!S.active && !!margin.querySelector(`:scope > .card[data-id="${S.active}"]`));
   const cards = [...margin.querySelectorAll(":scope > .card")].map((c) => {
     const a = anchorEl(c.dataset.id);
     const fallback = c.dataset.id === "draft" ? S.draft?.y ?? 0 : 0;
@@ -1560,9 +1581,16 @@ function layoutCards() {
   const gap = 10;
   const ai = cards.findIndex((x) => x.c.dataset.id === S.active);
   const pos = new Array(cards.length);
-  // The active card sits right at its text; the others make room above and below (Google Docs style).
+  // The active card is centred on the text it points at and kept fully on screen (a pending jump
+  // counts: its scroll is where the view will be). The others stack above and below it, dimmed.
   if (ai >= 0) {
-    pos[ai] = Math.max(floor, cards[ai].want);
+    const box = anchorBox(S.active);
+    const vt = sc.top - mtop + (S.viewShift || 0) + 12;
+    const vb = vt + sc.height - 24;
+    const h = cards[ai].h;
+    let p = box ? (box.top + box.bottom) / 2 - mtop - h / 2 : cards[ai].want;
+    p = h >= vb - vt ? vt : Math.min(Math.max(p, vt), vb - h);
+    pos[ai] = Math.max(floor, p);
     for (let i = ai + 1; i < cards.length; i++) pos[i] = Math.max(cards[i].want, pos[i - 1] + cards[i - 1].h + gap);
     for (let i = ai - 1; i >= 0; i--) pos[i] = Math.min(cards[i].want, pos[i + 1] - cards[i].h - gap);
     if (pos[0] < floor) {
@@ -1628,9 +1656,24 @@ async function jumpComment(delta) {
   const sc = $("scroller");
   const box = sc.getBoundingClientRect();
   if (!S.live.has(id)) return sc.scrollTo({ top: 0, behavior: "smooth" });
-  const a = anchorEl(id);
+  centerOn(id);
+}
+
+// Scrolls so the comment's text sits mid-screen; its card is centred on the same line, so text and
+// card line up. The card layout is told where the view is going, so it does not wait for the glide.
+let shiftTimer = null;
+function centerOn(id) {
+  const sc = $("scroller");
+  const box = sc.getBoundingClientRect();
+  const a = anchorBox(id);
   if (!a) return;
-  const by = a.getBoundingClientRect().top - box.top - box.height / 3;
+  const want = (a.top + a.bottom) / 2 - (box.top + box.height / 2);
+  const to = Math.min(Math.max(sc.scrollTop + want, 0), Math.max(0, sc.scrollHeight - sc.clientHeight));
+  const by = to - sc.scrollTop;
+  S.viewShift = by;
+  layoutCards();
+  clearTimeout(shiftTimer);
+  shiftTimer = setTimeout(() => (S.viewShift = 0), 1000);
   // Gliding across many pages would hold up the next click; only a nearby comment gets the slide.
   sc.scrollBy({ top: by, behavior: Math.abs(by) > box.height * 1.5 ? "instant" : "smooth" });
 }
@@ -1658,12 +1701,9 @@ function setActive(id, fromCard = false) {
     layoutCards();
   }
   if (fromCard && id) {
-    const a = anchorEl(id);
+    const a = anchorBox(id);
     const sc = $("scroller").getBoundingClientRect();
-    if (a) {
-      const r = a.getBoundingClientRect();
-      if (r.top < sc.top + 40 || r.bottom > sc.bottom - 40) $("scroller").scrollBy({ top: r.top - sc.top - 160, behavior: "smooth" });
-    }
+    if (a && (a.top < sc.top + 40 || a.bottom > sc.bottom - 40)) centerOn(id);
     requestAnimationFrame(() => document.querySelector(`.card[data-id="${id}"] .composer textarea`)?.focus({ preventScroll: true }));
   }
 }
@@ -2173,7 +2213,8 @@ async function compilePdf() {
       const top = S.pdfScroll ?? sc.scrollTop;
       S.pdfScroll = null;
       const pages = $("pdfPages");
-      const built = await renderPdf(r.pdf, pages.clientWidth);
+      S.pdfUrl = r.pdf;
+      const built = await renderPdf(r.pdf, pdfWidth());
       if (run !== pdfCompile || S.mode !== "pdf") return;
       pages.replaceChildren(...built);
       status.replaceChildren();
@@ -2182,6 +2223,8 @@ async function compilePdf() {
       sc.scrollTo({ top, behavior: "instant" });
       renderCards();
       paintPdf();
+      updatePosSoon();
+      refreshFindSoon();
     } else {
       const line = r.error?.line;
       status.replaceChildren(h("div", { class: "pdf-error" },
@@ -2191,6 +2234,41 @@ async function compilePdf() {
   } catch (err) {
     status.replaceChildren(h("div", { class: "pdf-error" }, h("b", {}, "Error"), err.message));
   }
+}
+
+// The PDF follows the reading-size setting: A+/A- zoom the pages, not the browser, so the
+// comment margin stays at normal size next to enlarged text.
+const PDF_BASE_W = 860;
+const PDF_BASE_SIZE = 17.5;
+function pdfZoom() {
+  return R.size / PDF_BASE_SIZE;
+}
+function pdfWidth() {
+  return Math.round(PDF_BASE_W * pdfZoom());
+}
+
+let pdfZoomTimer = null;
+function schedulePdfZoom() {
+  if (S.mode !== "pdf" || !S.pdfUrl || !$("pdfPages").querySelector(".pdf-page")) return;
+  clearTimeout(pdfZoomTimer);
+  pdfZoomTimer = setTimeout(async () => {
+    const run = ++pdfCompile;
+    const sc = $("scroller");
+    const pages = $("pdfPages");
+    const before = sc.scrollHeight - sc.clientHeight;
+    const frac = before > 0 ? sc.scrollTop / before : 0;
+    try {
+      const built = await renderPdf(S.pdfUrl, pdfWidth());
+      if (run !== pdfCompile || S.mode !== "pdf") return;
+      pages.replaceChildren(...built);
+      const after = sc.scrollHeight - sc.clientHeight;
+      sc.scrollTo({ top: frac * after, behavior: "instant" });
+      renderCards();
+      paintPdf();
+      updatePosSoon();
+      refreshFindSoon();
+    } catch {}
+  }, 150);
 }
 
 // ---------- comments on the PDF ----------
@@ -2466,14 +2544,24 @@ const palette = $("palette");
 let pal = null;
 let palTimer = null;
 
-function openPalette() {
-  if (palette.classList.contains("on")) return $("paletteInput").select();
-  pal = { items: [], i: 0, seq: 0 };
+// { text: true } is ⌘⇧F: search inside every file only, seeded with the selection.
+function openPalette({ text = false, q = "" } = {}) {
+  const input = $("paletteInput");
+  input.placeholder = text ? "Search in all files…" : "Go to a file, or search the text…";
+  if (text && q && !q.includes("\n") && q.length < 200) input.value = q;
+  if (palette.classList.contains("on")) {
+    pal.textOnly = text;
+    paletteSearch();
+    return input.select();
+  }
+  pal = { items: [], i: 0, seq: 0, textOnly: text };
+  palette.classList.toggle("text-only", text);
   palette.classList.add("on");
   $("paletteBackdrop").classList.add("on");
   paletteSearch();
-  $("paletteInput").focus();
-  requestAnimationFrame(() => $("paletteInput").select());
+  input.focus();
+  input.select();
+  requestAnimationFrame(() => input.select());
 }
 
 function closePalette() {
@@ -2501,11 +2589,11 @@ function fileHits(q) {
 function paletteSearch() {
   if (!pal) return;
   const q = $("paletteInput").value.trim();
-  const files = fileHits(q);
+  const files = pal.textOnly ? [] : fileHits(q);
   pal.items = files;
   pal.i = 0;
   clearTimeout(palTimer);
-  if (q.length < 2) return renderPalette(q, "");
+  if (q.length < 2) return renderPalette(q, pal.textOnly ? "type at least 2 characters" : "");
   renderPalette(q, "searching the text…");
   const seq = ++pal.seq;
   palTimer = setTimeout(async () => {
@@ -2527,7 +2615,10 @@ function renderPalette(q, hint) {
   const list = $("paletteList");
   $("paletteHint").textContent = hint;
   if (!pal.items.length) {
-    list.replaceChildren(h("div", { class: "pal-none" }, q ? "Nothing matches" : "No files to open"));
+    const none = pal.textOnly
+      ? q.length < 2 ? "Type to search every file" : hint.startsWith("searching") ? "Searching…" : "Nothing matches"
+      : q ? "Nothing matches" : "No files to open";
+    list.replaceChildren(h("div", { class: "pal-none" }, none));
     return;
   }
   const kids = [];
@@ -2605,6 +2696,381 @@ function revealOffset(start, end) {
   sc.scrollBy({ top: r.top - sc.getBoundingClientRect().top - 180, behavior: "instant" });
 }
 
+// ---------- position counter: page in the PDF, line elsewhere (⌃G: go to line) ----------
+
+const pos = { unit: null, total: 0, goLine: false, raf: 0, text: null, starts: [0] };
+
+function lineStarts() {
+  if (pos.text !== S.text) {
+    pos.text = S.text;
+    pos.starts = [0];
+    for (let i = 0; i < S.text.length; i++) if (S.text.charCodeAt(i) === 10) pos.starts.push(i + 1);
+  }
+  return pos.starts;
+}
+
+// 1-based line holding a source offset.
+function lineAt(offset) {
+  const st = lineStarts();
+  let lo = 0;
+  let hi = st.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (st[mid] <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo + 1;
+}
+
+// The topmost source line still on screen in the editor, measured on the backdrop.
+function editTopLine() {
+  const top = $("scroller").getBoundingClientRect().top + 4;
+  const st = lineStarts();
+  let lo = 0;
+  let hi = st.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (backdropRect(st[mid]).top <= top) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo + 1;
+}
+
+function pdfPageEls() {
+  return [...$("pdfPages").querySelectorAll(".pdf-page")];
+}
+
+// The page that fills the upper part of the view.
+function pdfCurrentPage(pages) {
+  const sc = $("scroller").getBoundingClientRect();
+  const y = sc.top + sc.height * 0.35;
+  let cur = 1;
+  for (const p of pages) {
+    if (p.getBoundingClientRect().top <= y) cur = Number(p.dataset.page);
+    else break;
+  }
+  return cur;
+}
+
+function updatePos() {
+  const el = $("pos");
+  const input = $("posInput");
+  const pages = S.mode === "pdf" ? pdfPageEls() : [];
+  const shown = Boolean(S.file) && (pos.goLine || S.mode === "read" || S.mode === "edit" || pages.length > 0);
+  el.classList.toggle("on", shown);
+  if (!shown) return;
+  const unit = !pos.goLine && S.mode === "pdf" ? "page" : "line";
+  let cur = "";
+  let total;
+  if (unit === "page") {
+    total = pages.length;
+    cur = pdfCurrentPage(pages);
+  } else {
+    total = lineStarts().length;
+    if (S.mode === "edit") cur = editTopLine();
+    else if (S.mode === "read") cur = lineAt(viewOffset());
+  }
+  pos.unit = unit;
+  pos.total = total;
+  $("posUnit").textContent = unit === "page" ? "Page" : "Line";
+  $("posTotal").textContent = "/ " + total;
+  input.style.setProperty("--digits", String(total).length);
+  input.placeholder = String(cur);
+  if (document.activeElement !== input) input.value = String(cur);
+}
+
+function updatePosSoon() {
+  if (pos.raf) return;
+  pos.raf = requestAnimationFrame(() => {
+    pos.raf = 0;
+    updatePos();
+  });
+}
+
+// ⌃G: the counter switches to lines (also over the PDF) and takes the keyboard.
+function openGoLine() {
+  if (!S.file) return;
+  pos.goLine = true;
+  updatePos();
+  const input = $("posInput");
+  input.value = "";
+  input.focus();
+}
+
+function jumpToPage(n) {
+  const pages = pdfPageEls();
+  if (!pages.length) return;
+  const p = pages[Math.max(1, Math.min(n, pages.length)) - 1];
+  const sc = $("scroller");
+  sc.scrollBy({ top: p.getBoundingClientRect().top - sc.getBoundingClientRect().top - 12, behavior: "instant" });
+}
+
+async function jumpToLine(n) {
+  const total = lineStarts().length;
+  n = Math.max(1, Math.min(n, total));
+  const sc = $("scroller");
+  if (S.mode === "pdf") {
+    // SyncTeX knows where a source line landed; blank lines produce nothing, so try the next few.
+    if (S.synctex && pdfPageEls().length) {
+      const lines = [0, 1, 2, 3, 4, 5, -1, -2].map((d) => n + d).filter((l) => l >= 1 && l <= total);
+      try {
+        const { boxes } = await api("POST", "/api/synctex", { op: "view", path: S.file, lines });
+        for (const l of lines) {
+          const b = boxes[l]?.[0];
+          const pageEl = b && $("pdfPages").querySelector(`.pdf-page[data-page="${b.page}"]`);
+          if (!pageEl) continue;
+          const y = pageEl.getBoundingClientRect().top + b.y * Number(pageEl.dataset.scale);
+          sc.scrollBy({ top: y - sc.getBoundingClientRect().top - sc.clientHeight / 3, behavior: "instant" });
+          return;
+        }
+      } catch {}
+    }
+    if (!modesFor().includes("edit")) return;
+    setMode("edit");
+  }
+  const start = lineStarts()[n - 1];
+  if (S.mode === "read") {
+    const el = [...$("doc").querySelectorAll("[data-s]")].find((e) => Number(e.dataset.s) >= start);
+    if (el) sc.scrollBy({ top: el.getBoundingClientRect().top - sc.getBoundingClientRect().top - sc.clientHeight / 3, behavior: "instant" });
+    return;
+  }
+  if (S.mode !== "edit") return;
+  src.focus({ preventScroll: true });
+  src.setSelectionRange(start, start);
+  sc.scrollBy({ top: backdropRect(start).top - sc.getBoundingClientRect().top - sc.clientHeight / 3, behavior: "instant" });
+}
+
+function endPosEdit() {
+  pos.goLine = false;
+  updatePos();
+}
+
+function wirePos() {
+  const input = $("posInput");
+  input.addEventListener("focus", () => requestAnimationFrame(() => input.select()));
+  input.addEventListener("input", () => {
+    const v = input.value.replace(/\D/g, "");
+    if (v !== input.value) input.value = v;
+  });
+  input.addEventListener("keydown", async (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      return input.blur();
+    }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const cur = Number(input.value || input.placeholder) || 1;
+      input.value = String(Math.max(1, Math.min(pos.total, cur + (e.key === "ArrowUp" ? -1 : 1))));
+      return;
+    }
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const n = parseInt(input.value, 10);
+    const unit = pos.unit;
+    // Leaving the field first lets the editor take focus after a line jump.
+    input.blur();
+    if (!Number.isFinite(n)) return;
+    if (unit === "page") jumpToPage(n);
+    else await jumpToLine(n);
+    updatePos();
+  });
+  input.addEventListener("blur", () => setTimeout(endPosEdit, 0));
+  $("pos").addEventListener("mousedown", (e) => e.target !== input && (e.preventDefault(), input.focus()));
+}
+
+// ---------- find in file (⌘F) ----------
+// Searches the text as shown in the current view (the rendered page, the source, or the PDF's
+// text layer) and paints matches with the CSS Custom Highlight API, so the DOM is never touched.
+
+const F = { open: false, hits: [], i: -1, matchCase: store.get("findCase", false), raf: 0, text: "" };
+const HAS_HL = typeof CSS !== "undefined" && "highlights" in CSS && typeof Highlight !== "undefined";
+const BLOCK_TAGS = new Set(["P", "LI", "H1", "H2", "H3", "H4", "H5", "H6", "PRE", "BLOCKQUOTE", "TR", "TD", "TH", "DIV", "BR", "HR", "DT", "DD", "FIGCAPTION"]);
+
+function findRoot() {
+  return S.mode === "edit" ? $("backdrop") : S.mode === "pdf" ? $("pdfPages") : S.mode === "changes" ? $("changes") : $("doc");
+}
+
+// The visible text of a view as one string, plus where each text node starts in it. Block
+// boundaries become "\n" so a match never runs from one paragraph into the next.
+function collectText(root) {
+  const nodes = [];
+  let text = "";
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (n) => n.nodeType === 1 && n.classList.contains("katex-mathml") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  let n;
+  while ((n = walker.nextNode())) {
+    if (n.nodeType === 1) {
+      if (BLOCK_TAGS.has(n.tagName) && text && !text.endsWith("\n")) text += "\n";
+      continue;
+    }
+    if (!n.nodeValue) continue;
+    nodes.push({ node: n, start: text.length });
+    text += n.nodeValue;
+  }
+  return { text, nodes };
+}
+
+// Offset in the joined text -> DOM position. An offset on a separator snaps to the next node
+// (for a start) or the end of the previous one (for an end).
+function domAt(nodes, off, isEnd) {
+  let lo = 0;
+  let hi = nodes.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (nodes[mid].start <= off) lo = mid;
+    else hi = mid - 1;
+  }
+  const x = nodes[lo];
+  const len = x.node.nodeValue.length;
+  if (off - x.start <= len) {
+    if (isEnd || off - x.start < len || !nodes[lo + 1]) return [x.node, Math.min(off - x.start, len)];
+  }
+  if (isEnd) return [x.node, len];
+  const next = nodes[lo + 1];
+  return next ? [next.node, 0] : [x.node, len];
+}
+
+function runFind({ keep = false } = {}) {
+  const q = $("findInput").value;
+  const prevAt = keep && F.hits[F.i] ? F.hits[F.i].at : null;
+  F.hits = [];
+  F.i = -1;
+  if (q && S.file) {
+    const { text, nodes } = collectText(findRoot());
+    F.text = text;
+    const hay = F.matchCase ? text : text.toLowerCase();
+    const needle = F.matchCase ? q : q.toLowerCase();
+    if (nodes.length) {
+      for (let at = hay.indexOf(needle); at !== -1 && F.hits.length < 5000; at = hay.indexOf(needle, at + needle.length)) {
+        const r = document.createRange();
+        const [sn, so] = domAt(nodes, at, false);
+        const [en, eo] = domAt(nodes, at + needle.length, true);
+        try {
+          r.setStart(sn, so);
+          r.setEnd(en, eo);
+        } catch {
+          continue;
+        }
+        F.hits.push({ at, end: at + needle.length, range: r });
+      }
+    }
+    if (F.hits.length) {
+      if (prevAt != null) F.i = Math.max(0, F.hits.findIndex((x) => x.at >= prevAt));
+      else {
+        // Start from the first match at or below the top of the view, as an editor would.
+        const top = $("scroller").getBoundingClientRect().top;
+        F.i = F.hits.findIndex((x) => x.range.getBoundingClientRect().bottom >= top);
+        if (F.i < 0) F.i = 0;
+      }
+    }
+  }
+  paintFind();
+  if (!keep) revealFind();
+}
+
+function paintFind() {
+  const count = $("findCount");
+  const q = $("findInput").value;
+  $("find").classList.toggle("none", Boolean(q) && !F.hits.length);
+  count.textContent = !q ? "" : F.hits.length ? `${F.i + 1} of ${F.hits.length}${F.hits.length >= 5000 ? "+" : ""}` : "No results";
+  $("findPrev").disabled = $("findNext").disabled = F.hits.length < 2;
+  if (!HAS_HL) return;
+  if (!F.open || !F.hits.length) {
+    CSS.highlights.delete("find-hit");
+    CSS.highlights.delete("find-cur");
+    return;
+  }
+  CSS.highlights.set("find-hit", new Highlight(...F.hits.map((x) => x.range)));
+  CSS.highlights.set("find-cur", new Highlight(F.hits[F.i].range));
+}
+
+function revealFind() {
+  const hit = F.hits[F.i];
+  if (!hit) return;
+  const r = hit.range.getBoundingClientRect();
+  const sc = $("scroller");
+  const box = sc.getBoundingClientRect();
+  if (r.top < box.top + 60 || r.bottom > box.bottom - 40) {
+    sc.scrollBy({ top: r.top - box.top - sc.clientHeight / 3, behavior: "instant" });
+  }
+}
+
+function stepFind(d) {
+  if (!F.hits.length) return;
+  F.i = (F.i + d + F.hits.length) % F.hits.length;
+  paintFind();
+  revealFind();
+}
+
+function selectedText() {
+  if (S.mode === "edit" && document.activeElement === src) return src.value.slice(src.selectionStart, src.selectionEnd);
+  return window.getSelection()?.toString() || "";
+}
+
+function openFind() {
+  if (!S.file) return;
+  const input = $("findInput");
+  const sel = selectedText();
+  if (sel && !sel.includes("\n") && sel.length < 200) input.value = sel;
+  F.open = true;
+  $("find").classList.add("on");
+  input.focus();
+  input.select();
+  runFind();
+}
+
+// Closing leaves the current match selected, so it can be commented on or typed over.
+function closeFind() {
+  if (!F.open) return;
+  const hit = F.hits[F.i];
+  F.open = false;
+  $("find").classList.remove("on");
+  paintFind();
+  if (!hit) return;
+  if (S.mode === "edit") {
+    src.focus({ preventScroll: true });
+    src.setSelectionRange(hit.at, hit.end);
+  } else {
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(hit.range);
+  }
+}
+
+// The view re-rendered (typing, a reload, a recompile, a mode switch): match again in place.
+function refreshFindSoon() {
+  if (!F.open || F.raf) return;
+  F.raf = requestAnimationFrame(() => {
+    F.raf = 0;
+    if (F.open) runFind({ keep: true });
+  });
+}
+
+function wireFind() {
+  const input = $("findInput");
+  input.addEventListener("input", () => runFind());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") return e.preventDefault(), e.stopPropagation(), closeFind();
+    if (e.key === "Enter") return e.preventDefault(), stepFind(e.shiftKey ? -1 : 1);
+  });
+  $("findNext").addEventListener("click", () => stepFind(1));
+  $("findPrev").addEventListener("click", () => stepFind(-1));
+  $("findClose").addEventListener("click", () => closeFind());
+  const caseBtn = $("findCase");
+  caseBtn.setAttribute("aria-pressed", String(F.matchCase));
+  caseBtn.addEventListener("click", () => {
+    F.matchCase = !F.matchCase;
+    store.set("findCase", F.matchCase);
+    caseBtn.setAttribute("aria-pressed", String(F.matchCase));
+    runFind();
+    input.focus();
+  });
+  // Buttons keep the keyboard in the field.
+  $("find").addEventListener("mousedown", (e) => e.target !== input && e.preventDefault());
+}
+
 // ---------- reading settings ----------
 
 const FACES = { serif: "var(--read)", sans: "var(--read-sans)", mono: "var(--mono)" };
@@ -2622,6 +3088,7 @@ function applyReading() {
   root.style.setProperty("--read-size", R.size + "px");
   root.style.setProperty("--read-lh", R.face === "mono" ? "1.62" : "1.7");
   root.style.setProperty("--col-w", R.width + "px");
+  root.style.setProperty("--pdf-w", pdfWidth() + "px");
   root.dataset.reflow = R.reflow ? "1" : "0";
   for (const b of document.querySelectorAll("#reading [data-face]")) b.classList.toggle("on", b.dataset.face === R.face);
   for (const b of document.querySelectorAll("#reading [data-width]")) b.classList.toggle("on", Number(b.dataset.width) === R.width);
@@ -2637,6 +3104,7 @@ function setReading(patch) {
   store.set("readReflow", R.reflow);
   applyReading();
   renderView();
+  schedulePdfZoom();
   setTimeout(layoutCards, 0);
 }
 
@@ -2728,6 +3196,7 @@ function wire() {
   window.addEventListener("resize", () => {
     if (S.mode === "edit") paintBackdrop();
     layoutCards();
+    updatePosSoon();
     hideChip();
   });
   $("doc").addEventListener("mouseover", (e) => {
@@ -2736,13 +3205,30 @@ function wire() {
     else hideNoteTip();
   });
   $("doc").addEventListener("mouseleave", hideNoteTip);
-  $("scroller").addEventListener("scroll", () => (hideChip(), hideNoteTip(), closeOutline()), { passive: true });
+  $("scroller").addEventListener("scroll", () => (hideChip(), hideNoteTip(), closeOutline(), updatePosSoon()), { passive: true });
+  wirePos();
+  wireFind();
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#outline, #fileName")) closeOutline();
   });
   new ResizeObserver(() => layoutCards()).observe($("docCol"));
 
   document.addEventListener("keydown", (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    // ⌘F find in this file, ⌘⇧F search all files, ⌃G go to line, ⌘G / ⌘⇧G step through matches.
+    if (mod && !e.altKey && e.code === "KeyF") {
+      e.preventDefault();
+      if (e.shiftKey) return openPalette({ text: true, q: selectedText() });
+      return openFind();
+    }
+    if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.code === "KeyG") {
+      e.preventDefault();
+      return openGoLine();
+    }
+    if (e.metaKey && !e.ctrlKey && !e.altKey && e.code === "KeyG" && F.open) {
+      e.preventDefault();
+      return stepFind(e.shiftKey ? -1 : 1);
+    }
     // Quick search everywhere but inside a textarea, where ⌘K still inserts a link.
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k" && e.target.tagName !== "TEXTAREA") {
       e.preventDefault();
