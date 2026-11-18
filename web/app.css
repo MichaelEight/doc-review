@@ -376,13 +376,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .file-item .fa:hover { background: var(--hover); color: var(--ink); }
 .file-item:hover .fa, .file-item:focus-visible .fa, .file-item .fa.set { display: flex; }
 .file-item .fa.set svg { fill: currentColor; }
-.file-item .fa.set:nth-child(1) { color: var(--mk-red); }
+.file-item .fa.set:nth-child(1) { color: var(--fav); }
+.file-item .fa.set:nth-child(1) svg { width: 16px; height: 16px; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--fav) 45%, transparent)); }
 .file-item .fa.set:nth-child(2) { color: var(--accent); }
 /* Under "Pinned" the pin says nothing new; it shows on hover only, to unpin. */
 .file-item.pinned:not(:hover) .fa:nth-child(2) { display: none; }
 .file-dir.pinned-head { cursor: default; }
 .file-dir.pinned-head:hover { background: transparent; color: var(--muted); }
-.side-tool-btns .icon-btn.on { color: var(--mk-red); background: var(--hover); }
+.side-tool-btns .icon-btn.on { color: var(--fav); background: var(--hover); }
 .side-tool-btns .icon-btn.on svg { fill: currentColor; }
 
 /* Colour marks: a tinted row with a coloured bar on its left edge. */
@@ -391,6 +392,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   --mk-green: #1f9d6a;
   --mk-blue: #2b7de9;
   --mk-red: #d13b3b;
+  --fav: #ff4d6a;
   --mk-purple: #8b5cf6;
 }
 .mk-yellow { --mk: var(--mk-yellow); }
@@ -489,19 +491,29 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .side-toggle { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; cursor: pointer; }
 
 .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.scroller { flex: 1; overflow: auto; position: relative; scroll-behavior: smooth; }
+.panes { flex: 1; min-height: 0; display: flex; }
+.scroller { flex: 1; min-width: 0; overflow: auto; position: relative; scroll-behavior: smooth; }
 
 /* ---------- tabs ---------- */
 
-.tabs {
+.tabbar {
   display: none;
   flex: none;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 55%, var(--bg));
+}
+body.has-tabs .tabbar { display: flex; }
+/* Page counter and comment arrows live at the right end of the tab bar, clear of the comments. */
+.tab-tools { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; }
+.tabs {
+  display: none;
+  flex: 1;
+  min-width: 0;
   gap: 2px;
   padding: 6px 10px 0;
   overflow-x: auto;
   scrollbar-width: none;
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--paper) 55%, var(--bg));
 }
 .tabs::-webkit-scrollbar { display: none; }
 body.has-tabs .tabs { display: flex; }
@@ -529,8 +541,8 @@ body.has-tabs .tabs { display: flex; }
 .tab.on::before { content: ""; position: absolute; left: 10px; right: 10px; top: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
 .tab[class*="mk-"]::after { content: ""; position: absolute; left: 4px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--mk); }
 .tab-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tab-fav { display: flex; color: var(--mk-red); }
-.tab-fav svg { width: 13px; height: 13px; fill: currentColor; }
+.tab-fav { display: flex; color: var(--fav); }
+.tab-fav svg { width: 15px; height: 15px; fill: currentColor; stroke: none; }
 .tab .badge { font-size: 11px; font-weight: 600; background: var(--hl-user-on); color: var(--ink); border-radius: 99px; padding: 1px 6px; }
 .tab .chg { width: 7px; height: 7px; border-radius: 50%; background: var(--hl-ai-line); flex: none; }
 .tab-x { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; color: var(--muted); opacity: 0; }
@@ -1294,18 +1306,13 @@ body.has-active .hl:not(.on) { opacity: 0.4; }
 
 /* Fixed, with a fixed-width counter: the buttons stay under the cursor between clicks. */
 .comment-nav {
-  position: fixed;
-  right: 24px;
-  bottom: 20px;
-  z-index: 25;
   display: none;
   align-items: center;
   gap: 2px;
-  padding: 4px;
+  padding: 1px;
   background: var(--paper);
   border: 1px solid var(--line-2);
-  border-radius: 12px;
-  box-shadow: var(--shadow-2);
+  border-radius: 10px;
 }
 .comment-nav.on { display: flex; }
 .comment-nav-count { width: 66px; text-align: center; font: 600 12.5px var(--ui); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
@@ -1313,25 +1320,18 @@ body.has-active .hl:not(.on) { opacity: 0.4; }
 /* ---------- position counter (page / line) ---------- */
 
 .pos {
-  position: fixed;
-  right: 24px;
-  bottom: 20px;
-  z-index: 25;
   display: none;
   align-items: baseline;
   gap: 5px;
-  padding: 6px 12px 6px 11px;
+  padding: 4px 11px;
   background: var(--paper);
   border: 1px solid var(--line-2);
-  border-radius: 12px;
-  box-shadow: var(--shadow-2);
+  border-radius: 10px;
   font: 600 12.5px var(--ui);
   font-variant-numeric: tabular-nums;
   color: var(--ink-2);
-  transition: bottom 0.18s var(--ease);
 }
 .pos.on { display: flex; }
-body:has(.comment-nav.on) .pos { bottom: 66px; }
 .pos-unit { font-weight: 500; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .pos-total { color: var(--muted); font-weight: 500; white-space: nowrap; }
 .pos input {
@@ -1380,3 +1380,24 @@ body:has(.comment-nav.on) .pos { bottom: 66px; }
 /* Over the PDF the text layer is invisible and the glyphs are on the canvas below: tint, don't cover. */
 .textLayer ::highlight(find-hit) { color: transparent; background-color: color-mix(in srgb, #f5b301 30%, transparent); }
 .textLayer ::highlight(find-cur) { color: transparent; background-color: color-mix(in srgb, #f59e0b 55%, transparent); }
+
+/* While the view scrolls the cards track it closely instead of easing behind. */
+.margin.following .card { transition: transform 0.1s linear, box-shadow 0.25s, border-color 0.25s, opacity 0.3s; }
+
+.card.on { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.tab-tools .pos { order: -1; }
+
+/* ---------- two PDFs side by side ---------- */
+
+.split-pane { display: none; }
+body.split.mode-pdf .panes { overflow-x: auto; }
+body.split.mode-pdf .scroller { flex: none; order: 1; }
+body.split.mode-pdf .scroller { box-shadow: inset 0 2px 0 var(--accent); }
+body.split.mode-pdf .split-pane { display: block; flex: none; overflow-y: auto; position: relative; border-left: 1px solid var(--line); border-right: 1px solid var(--line); cursor: pointer; }
+body.split.mode-pdf .page { padding: 20px 12px; gap: 12px; }
+.split-pane .page { display: flex; justify-content: center; padding: 20px 12px; min-height: 100%; }
+.split-col { width: var(--pdf-w, 860px); flex: none; }
+.split-pane .pdf-pages { opacity: 0.9; transition: opacity 0.15s; }
+.split-pane:hover .pdf-pages { opacity: 1; }
+.split-label { position: sticky; top: 0; z-index: 4; padding: 5px 12px; font: 600 12px var(--ui); color: var(--muted); background: color-mix(in srgb, var(--paper) 85%, var(--bg)); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#splitBtn.on { color: var(--accent); background: var(--accent-soft); }

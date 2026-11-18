@@ -137,7 +137,7 @@ export class ReviewHttp {
     if (bp && req.method === "DELETE") return send(res, 200, (ws.deleteBriefPreset(bp[1]), { ok: true }));
     if (route === "POST /api/latex") {
       const out = await compileLatex(ws, body.path);
-      return send(res, 200, { ...out, pdf: out.pdf ? `/api/pdf?ws=${ws.id}&t=${this.token}&path=${encodeURIComponent(body.path)}&v=${Date.now()}` : null });
+      return send(res, 200, { ...out, pdf: out.pdf ? `/api/pdf?ws=${ws.id}&t=${this.token}&path=${encodeURIComponent(body.path)}&v=${Math.round(out.stamp || Date.now())}` : null });
     }
     if (route === "POST /api/synctex") {
       ws.resolve(body.path);

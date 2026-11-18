@@ -84,8 +84,47 @@ function firstError(log) {
   return { message: chunk[0].slice(2), line: line ? Number(line.match(/^l\.(\d+)/)[1]) : null };
 }
 
+// Files a build can depend on. A PDF newer than all of them under the workspace is still current.
+const SOURCE_EXT = new Set([".tex", ".bib", ".sty", ".cls", ".bst", ".bbx", ".cbx", ".def", ".cfg", ".png", ".jpg", ".jpeg", ".pdf", ".eps", ".svg", ".tikz", ".csv"]);
+
+function newestSource(dir, depth = 0, budget = { n: 4000 }) {
+  let newest = 0;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    if (e.name.startsWith(".") || e.name === "node_modules" || budget.n-- <= 0) continue;
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (depth < 5) newest = Math.max(newest, newestSource(p, depth + 1, budget));
+    } else if (SOURCE_EXT.has(path.extname(e.name).toLowerCase())) {
+      try {
+        newest = Math.max(newest, fs.statSync(p).mtimeMs);
+      } catch {}
+    }
+  }
+  return newest;
+}
+
+// The current PDF's modification time when nothing it is built from has changed since, else 0.
+export function currentPdfStamp(ws, rel) {
+  const pdf = pdfPath(ws, rel);
+  try {
+    const st = fs.statSync(pdf);
+    if (!fs.existsSync(pdf.replace(/\.pdf$/, ".synctex.gz"))) return 0;
+    return newestSource(ws.root) <= st.mtimeMs ? st.mtimeMs : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function compileLatex(ws, rel) {
   const abs = ws.resolve(rel);
+  const stamp = currentPdfStamp(ws, rel);
+  if (stamp) return { ok: true, pdf: pdfPath(ws, rel), stamp, error: null, log: "" };
   const outDir = path.join(ws.dir, "build", path.dirname(rel));
   fs.mkdirSync(outDir, { recursive: true });
   const cwd = path.dirname(abs);
@@ -111,5 +150,5 @@ export async function compileLatex(ws, rel) {
     log = res.out;
   }
   const ok = res.code === 0 && fs.existsSync(pdf);
-  return { ok, pdf: ok ? pdf : null, error: ok ? null : firstError(log) ?? { message: "LaTeX failed", line: null }, log: log.slice(-4000) };
+  return { ok, pdf: ok ? pdf : null, stamp: ok ? fs.statSync(pdf).mtimeMs : 0, error: ok ? null : firstError(log) ?? { message: "LaTeX failed", line: null }, log: log.slice(-4000) };
 }

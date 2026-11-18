@@ -11,7 +11,7 @@
 </head>
 <body>
   <header class="top">
-    <button class="icon-btn" id="sidebarToggle" title="Files">
+    <button class="icon-btn" id="sidebarToggle" title="Hide or show files (⌘B)">
       <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
     </button>
     <div class="crumbs">
@@ -115,7 +115,29 @@
       <label class="side-toggle"><input type="checkbox" id="showResolved" checked> Show resolved</label>
     </aside>
     <div class="main-col">
+    <div class="tabbar">
     <div class="tabs" id="tabs" role="tablist" aria-label="Open files"></div>
+    <div class="tab-tools">
+    <button class="icon-btn sm" id="splitBtn" title="Compare two PDFs side by side" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="7" height="15" rx="1.5"/><rect x="13.5" y="4.5" width="7" height="15" rx="1.5"/></svg>
+    </button>
+    <div class="comment-nav" id="commentNav" role="group" aria-label="Jump between comments">
+      <button class="icon-btn sm" id="prevComment" title="Previous comment (⌥,)" aria-label="Previous comment">
+        <svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
+      <span class="comment-nav-count" id="commentNavCount" aria-live="polite"></span>
+      <button class="icon-btn sm" id="nextComment" title="Next comment (⌥.)" aria-label="Next comment">
+        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </div>
+
+    <div class="pos" id="pos" title="Type a number and press ↵ to jump (⌃G: go to line)">
+      <span class="pos-unit" id="posUnit">Page</span>
+      <input id="posInput" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Current position">
+      <span class="pos-total" id="posTotal"></span>
+    </div>
+    </div>
+    </div>
     <div class="find-anchor">
       <div class="find" id="find" role="search" aria-label="Find in file">
         <svg class="find-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
@@ -133,6 +155,7 @@
         </button>
       </div>
     </div>
+    <div class="panes" id="panes">
     <main class="scroller" id="scroller">
       <div class="page" id="page">
         <div class="doc-col" id="docCol">
@@ -154,6 +177,11 @@
         <div class="margin" id="margin"></div>
       </div>
     </main>
+    <aside class="split-pane" id="splitPane" aria-label="Second PDF" title="Click to work in this PDF">
+      <div class="split-label" id="splitLabel"></div>
+      <div class="page"><div class="split-col"><div class="pdf-pages" id="splitPages"></div></div></div>
+    </aside>
+    </div>
     </div>
   </div>
 
@@ -162,21 +190,6 @@
     <span>Comment</span>
   </button>
 
-  <div class="comment-nav" id="commentNav" role="group" aria-label="Jump between comments">
-    <button class="icon-btn sm" id="prevComment" title="Previous comment (⌥,)" aria-label="Previous comment">
-      <svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>
-    </button>
-    <span class="comment-nav-count" id="commentNavCount" aria-live="polite"></span>
-    <button class="icon-btn sm" id="nextComment" title="Next comment (⌥.)" aria-label="Next comment">
-      <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-    </button>
-  </div>
-
-  <div class="pos" id="pos" title="Type a number and press ↵ to jump (⌃G: go to line)">
-    <span class="pos-unit" id="posUnit">Page</span>
-    <input id="posInput" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Current position">
-    <span class="pos-total" id="posTotal"></span>
-  </div>
 
   <div class="palette-backdrop" id="paletteBackdrop"></div>
   <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="Quick search">

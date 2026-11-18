@@ -49,7 +49,7 @@ const ICON = {
   caret: '<svg viewBox="0 0 24 24"><path d="M9.5 5.5l6.5 6.5-6.5 6.5"/></svg>',
   file: '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
   quote: '<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h7"/></svg>',
-  heart: '<svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>',
+  heart: '<svg viewBox="0 0 24 24"><path d="M12 20.8l-1.2-1.1C5.9 15.3 3 12.6 3 9.1 3 6.4 5.1 4.3 7.8 4.3c1.7 0 3.3.8 4.2 2.1.9-1.3 2.5-2.1 4.2-2.1 2.7 0 4.8 2.1 4.8 4.8 0 3.5-2.9 6.2-7.8 10.6L12 20.8z"/></svg>',
   pin: '<svg viewBox="0 0 24 24"><path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/></svg>',
   dots: '<svg viewBox="0 0 24 24"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke-width="3"/></svg>',
   tab: '<svg viewBox="0 0 24 24"><path d="M3 8h18v11H3zM3 8V5h7l2 3"/></svg>',
@@ -537,6 +537,7 @@ function renderTabs() {
 async function closeTab(path) {
   const i = S.tabs.indexOf(path);
   if (i < 0) return;
+  if (SP.on && (path === SP.file || path === S.file)) exitSplit();
   S.tabs.splice(i, 1);
   saveTabs();
   if (path !== S.file) return renderTabs(), renderSidebar();
@@ -869,6 +870,7 @@ async function toggleStyleRule(rule, enabled) {
 // ---------- files & modes ----------
 
 async function openFile(path) {
+  const prevFile = S.file;
   if (S.file) saveView();
   if (S.dirty) await save();
   closeModal(true);
@@ -901,6 +903,11 @@ async function openFile(path) {
   renderSidebar({ reveal: true });
   renderTabs();
   restoreView();
+  // Opening the file that sits in the other pane puts the one just left there instead.
+  if (SP.on && path === SP.file && prevFile && prevFile !== path) {
+    SP.file = prevFile;
+    await fillFrozen(prevFile);
+  }
 }
 
 async function reloadFile() {
@@ -946,6 +953,7 @@ function setMode(mode, initial = false) {
   hideChip();
   renderModes();
   renderView();
+  if (SP.on) applySplitLayout();
   if (mode === "pdf") compilePdf();
   if (mode === "edit") updateLock();
 }
@@ -1572,6 +1580,8 @@ function layoutCards() {
   const floor = det ? det.offsetHeight + 12 : 0;
   // Before measuring: with a comment active the others are compact, so they take less room.
   document.body.classList.toggle("has-active", !!S.active && !!margin.querySelector(`:scope > .card[data-id="${S.active}"]`));
+  // A card taller than the view scrolls inside itself (the wheel over it moves only the card).
+  for (const c of margin.querySelectorAll(":scope > .card")) c.style.maxHeight = c.dataset.id === S.active ? Math.max(160, sc.height - 24) + "px" : "";
   const cards = [...margin.querySelectorAll(":scope > .card")].map((c) => {
     const a = anchorEl(c.dataset.id);
     const fallback = c.dataset.id === "draft" ? S.draft?.y ?? 0 : 0;
@@ -1585,11 +1595,21 @@ function layoutCards() {
   // counts: its scroll is where the view will be). The others stack above and below it, dimmed.
   if (ai >= 0) {
     const box = anchorBox(S.active);
-    const vt = sc.top - mtop + (S.viewShift || 0) + 12;
+    const shift = S.scrollTarget == null ? 0 : S.scrollTarget - $("scroller").scrollTop;
+    const vt = sc.top - mtop + shift + 12;
     const vb = vt + sc.height - 24;
     const h = cards[ai].h;
-    let p = box ? (box.top + box.bottom) / 2 - mtop - h / 2 : cards[ai].want;
-    p = h >= vb - vt ? vt : Math.min(Math.max(p, vt), vb - h);
+    // The card follows the middle of the view while that line is inside the comment's text, and
+    // stops at its first or last line (text split by a page break or a figure counts as one).
+    let p;
+    if (box) {
+      const mid = (vt + vb) / 2;
+      const line = Math.min(Math.max(mid, box.top - mtop), box.bottom - mtop);
+      p = line - h / 2;
+    } else p = cards[ai].want;
+    // Kept fully on screen only while its text is; once the text has scrolled away the card goes with it.
+    const seen = !box || (box.bottom - mtop > vt && box.top - mtop < vb);
+    if (seen) p = h >= vb - vt ? vt : Math.min(Math.max(p, vt), vb - h);
     pos[ai] = Math.max(floor, p);
     for (let i = ai + 1; i < cards.length; i++) pos[i] = Math.max(cards[i].want, pos[i - 1] + cards[i - 1].h + gap);
     for (let i = ai - 1; i >= 0; i--) pos[i] = Math.min(cards[i].want, pos[i + 1] - cards[i].h - gap);
@@ -1620,9 +1640,9 @@ function layoutCards() {
 // ---------- previous / next comment ----------
 //
 // A fixed control: it never moves or changes width, so repeated clicks need no mouse movement. It
-// counts every comment in the file, resolved or not, whatever "Show resolved" says.
+// counts the comments that are shown: resolved ones only while "Show resolved" is on.
 
-const navItems = () => fileThreads().map((t) => ({ id: t.id, start: S.live.get(t.id)?.start ?? null }));
+const navItems = () => visibleThreads().map((t) => ({ id: t.id, start: S.live.get(t.id)?.start ?? null }));
 
 function renderCommentNav() {
   const items = S.file && S.mode !== "changes" ? commentOrder(navItems()) : [];
@@ -1670,10 +1690,10 @@ function centerOn(id) {
   const want = (a.top + a.bottom) / 2 - (box.top + box.height / 2);
   const to = Math.min(Math.max(sc.scrollTop + want, 0), Math.max(0, sc.scrollHeight - sc.clientHeight));
   const by = to - sc.scrollTop;
-  S.viewShift = by;
+  S.scrollTarget = to;
   layoutCards();
   clearTimeout(shiftTimer);
-  shiftTimer = setTimeout(() => (S.viewShift = 0), 1000);
+  shiftTimer = setTimeout(() => (S.scrollTarget = null), 1000);
   // Gliding across many pages would hold up the next click; only a nearby comment gets the slide.
   sc.scrollBy({ top: by, behavior: Math.abs(by) > box.height * 1.5 ? "instant" : "smooth" });
 }
@@ -2199,23 +2219,53 @@ function schedulePdf() {
 }
 
 let pdfCompile = 0;
+// Rendered pages per file. A file whose PDF is unchanged (same url: the server stamps it with the
+// build time, and does not rebuild when nothing changed) comes back from here without a render.
+const pdfCache = new Map();
 async function compilePdf() {
   if (S.mode !== "pdf" || !S.file) return;
   const run = ++pdfCompile;
+  const file = S.file;
+  const pages = $("pdfPages");
+  const hit = pdfCache.get(file);
+  // Show the last render at once while the server confirms it is current.
+  if (hit && hit.width === pdfWidth() && !pages.querySelector(".pdf-page")) {
+    pages.replaceChildren(...hit.pages);
+    S.pdfUrl = hit.url;
+    S.pdfHash = hit.hash;
+    if (S.pdfScroll != null) {
+      $("scroller").scrollTo({ top: S.pdfScroll, behavior: "instant" });
+      S.pdfScroll = null;
+    }
+    paintPdf();
+    renderCards();
+  }
   if (S.dirty) await save();
   const status = $("pdfStatus");
-  status.replaceChildren(h("span", { class: "agent-pill working" }, h("i"), h("span", {}, "Compiling…")));
+  const showing = !!pages.querySelector(".pdf-page");
+  if (!showing) status.replaceChildren(h("span", { class: "agent-pill working" }, h("i"), h("span", {}, "Compiling…")));
   try {
-    const r = await api("POST", "/api/latex", { path: S.file });
-    if (run !== pdfCompile) return;
+    const r = await api("POST", "/api/latex", { path: file });
+    if (run !== pdfCompile || S.file !== file) return;
     if (r.ok) {
       const sc = $("scroller");
       const top = S.pdfScroll ?? sc.scrollTop;
       S.pdfScroll = null;
-      const pages = $("pdfPages");
+      const cur = pdfCache.get(file);
+      let built;
+      if (cur && cur.url === r.pdf && cur.width === pdfWidth() && pages.querySelector(".pdf-page")) {
+        status.replaceChildren();
+        S.pdfUrl = r.pdf;
+        S.pdfHash = S.hash;
+        cur.hash = S.hash;
+        paintPdf();
+        updatePosSoon();
+        return;
+      }
       S.pdfUrl = r.pdf;
-      const built = await renderPdf(r.pdf, pdfWidth());
-      if (run !== pdfCompile || S.mode !== "pdf") return;
+      built = await renderPdf(r.pdf, pdfWidth());
+      if (run !== pdfCompile || S.mode !== "pdf" || S.file !== file) return;
+      pdfCache.set(file, { url: r.pdf, width: pdfWidth(), pages: built, hash: S.hash });
       pages.replaceChildren(...built);
       status.replaceChildren();
       S.pdfBoxes = new Map();
@@ -2226,6 +2276,7 @@ async function compilePdf() {
       updatePosSoon();
       refreshFindSoon();
     } else {
+      pdfCache.delete(file);
       const line = r.error?.line;
       status.replaceChildren(h("div", { class: "pdf-error" },
         h("b", {}, "LaTeX error"), h("span", { style: "flex:1" }, `${r.error?.message || "failed"}${line ? ` (line ${line})` : ""}`),
@@ -2244,6 +2295,7 @@ function pdfZoom() {
   return R.size / PDF_BASE_SIZE;
 }
 function pdfWidth() {
+  if (SP.on && S.mode === "pdf" && SP.w) return SP.w;
   return Math.round(PDF_BASE_W * pdfZoom());
 }
 
@@ -2261,6 +2313,7 @@ function schedulePdfZoom() {
       const built = await renderPdf(S.pdfUrl, pdfWidth());
       if (run !== pdfCompile || S.mode !== "pdf") return;
       pages.replaceChildren(...built);
+      pdfCache.set(S.file, { url: S.pdfUrl, width: pdfWidth(), pages: built, hash: S.pdfHash });
       const after = sc.scrollHeight - sc.clientHeight;
       sc.scrollTo({ top: frac * after, behavior: "instant" });
       renderCards();
@@ -3102,15 +3155,139 @@ function setReading(patch) {
   store.set("readSize", R.size);
   store.set("readWidth", R.width);
   store.set("readReflow", R.reflow);
+  if (SP.on) computeSplitW();
   applyReading();
   renderView();
   schedulePdfZoom();
+  if (SP.on && S.mode === "pdf") setTimeout(() => fillFrozen(SP.file), 200);
   setTimeout(layoutCards, 0);
+}
+
+// ---------- two PDFs side by side ----------
+//
+// The live pane is the normal one (with the comment margin next to it). The other is a frozen
+// copy of a second file's PDF with its own scroll. Clicking it makes it the live one: the two
+// files trade places, so comments always follow the PDF last clicked.
+
+const SP = { on: false, file: null, side: "right", w: 0, run: 0, busy: false };
+
+function computeSplitW() {
+  const total = $("panes").clientWidth;
+  const margin = $("margin").offsetWidth || 320;
+  SP.w = Math.round(Math.max(300, Math.floor((total - margin - 90) / 2)) * pdfZoom());
+}
+
+function applySplitLayout() {
+  document.body.classList.toggle("split", SP.on);
+  $("splitPane").style.order = SP.side === "right" ? "2" : "0";
+  $("splitBtn").classList.toggle("on", SP.on);
+  $("splitBtn").setAttribute("aria-pressed", String(SP.on));
+  document.documentElement.style.setProperty("--pdf-w", pdfWidth() + "px");
+}
+
+async function fillFrozen(file) {
+  const pages = $("splitPages");
+  const run = ++SP.run;
+  $("splitLabel").textContent = file;
+  const hit = pdfCache.get(file);
+  if (hit && hit.width === pdfWidth()) return void pages.replaceChildren(...hit.pages);
+  pages.replaceChildren();
+  try {
+    const r = await api("POST", "/api/latex", { path: file });
+    if (run !== SP.run || !SP.on) return;
+    if (!r.ok) return void pages.replaceChildren(h("div", { class: "pdf-error" }, h("b", {}, "LaTeX error"), h("span", {}, r.error?.message || "failed")));
+    const c = pdfCache.get(file);
+    let built = c && c.url === r.pdf && c.width === pdfWidth() ? c.pages : null;
+    if (!built) {
+      built = await renderPdf(r.pdf, pdfWidth());
+      pdfCache.set(file, { url: r.pdf, width: pdfWidth(), pages: built, hash: null });
+    }
+    if (run !== SP.run || !SP.on || SP.file !== file) return;
+    pages.replaceChildren(...built);
+  } catch (err) {
+    pages.replaceChildren(h("div", { class: "pdf-error" }, h("b", {}, "Error"), h("span", {}, err.message)));
+  }
+}
+
+let splitTimer = null;
+function relayoutSplit() {
+  if (!SP.on) return;
+  computeSplitW();
+  applySplitLayout();
+  clearTimeout(splitTimer);
+  splitTimer = setTimeout(() => {
+    schedulePdfZoom();
+    if (S.mode === "pdf") fillFrozen(SP.file);
+  }, 200);
+}
+
+async function enterSplit() {
+  if (S.kind !== "tex" || !S.latex) return toast("Split compares two LaTeX files with a PDF");
+  const other = S.tabs.find((p) => p !== S.file && kindOf(p) === "tex");
+  if (!other) return toast("Open a second .tex file in a tab first");
+  SP.on = true;
+  SP.file = other;
+  SP.side = "right";
+  computeSplitW();
+  applySplitLayout();
+  if (S.mode !== "pdf") setMode("pdf");
+  else compilePdf();
+  fillFrozen(other);
+}
+
+function exitSplit() {
+  if (!SP.on) return;
+  SP.on = false;
+  SP.run++;
+  $("splitPages").replaceChildren();
+  applySplitLayout();
+  if (S.mode === "pdf") compilePdf();
+}
+
+async function activateFrozen() {
+  if (!SP.on || SP.busy || S.mode !== "pdf") return;
+  SP.busy = true;
+  const liveTop = $("scroller").scrollTop;
+  const frozenTop = $("splitPane").scrollTop;
+  try {
+    await openFile(SP.file); // swaps the two files (see openFile) and shows this one live
+    SP.side = SP.side === "right" ? "left" : "right";
+    applySplitLayout();
+    if (S.mode !== "pdf") setMode("pdf");
+    S.pdfScroll = null;
+    $("scroller").scrollTo({ top: frozenTop, behavior: "instant" });
+    $("splitPane").scrollTo({ top: liveTop, behavior: "instant" });
+  } finally {
+    SP.busy = false;
+  }
+}
+
+function toggleSidebar() {
+  const hidden = !$("sidebar").classList.contains("hidden");
+  $("sidebar").classList.toggle("hidden", hidden);
+  store.set("sidebarHidden", hidden);
+  setTimeout(() => (layoutCards(), relayoutSplit()), 340);
 }
 
 // ---------- wiring ----------
 
 function wire() {
+  // The active card tracks the middle of the view while scrolling (see layoutCards).
+  let followRaf = 0;
+  let followTimer = null;
+  $("scroller").addEventListener("scroll", () => {
+    if (!S.active || followRaf) return;
+    followRaf = requestAnimationFrame(() => {
+      followRaf = 0;
+      const t = S.scrollTarget;
+      if (t != null && Math.abs(t - $("scroller").scrollTop) < 2) S.scrollTarget = null;
+      $("margin").classList.add("following");
+      clearTimeout(followTimer);
+      followTimer = setTimeout(() => $("margin").classList.remove("following"), 160);
+      layoutCards();
+    });
+  }, { passive: true });
+  $("scroller").addEventListener("wheel", () => (S.scrollTarget = null), { passive: true });
   $("sendBtn").addEventListener("click", (e) => (e.stopPropagation(), send()));
   $("prevComment").addEventListener("click", () => jumpComment(-1));
   $("nextComment").addEventListener("click", () => jumpComment(1));
@@ -3135,11 +3312,11 @@ function wire() {
     saveBriefSoon(0);
     renderBriefPresets();
   });
-  $("sidebarToggle").addEventListener("click", () => {
-    const hidden = !$("sidebar").classList.contains("hidden");
-    $("sidebar").classList.toggle("hidden", hidden);
-    store.set("sidebarHidden", hidden);
-    setTimeout(layoutCards, 320);
+  $("sidebarToggle").addEventListener("click", toggleSidebar);
+  $("splitBtn").addEventListener("click", () => (SP.on ? exitSplit() : enterSplit()));
+  $("splitPane").addEventListener("click", (e) => {
+    if (window.getSelection()?.toString() || e.target.closest("button, a")) return;
+    activateFrozen();
   });
   $("fileFilter").addEventListener("input", () => renderSidebar());
   $("favOnly").addEventListener("click", () => {
@@ -3194,6 +3371,7 @@ function wire() {
     renderView();
   });
   window.addEventListener("resize", () => {
+    relayoutSplit();
     if (S.mode === "edit") paintBackdrop();
     layoutCards();
     updatePosSoon();
@@ -3228,6 +3406,10 @@ function wire() {
     if (e.metaKey && !e.ctrlKey && !e.altKey && e.code === "KeyG" && F.open) {
       e.preventDefault();
       return stepFind(e.shiftKey ? -1 : 1);
+    }
+    if (mod && !e.altKey && !e.shiftKey && e.code === "KeyB") {
+      e.preventDefault();
+      return toggleSidebar();
     }
     // Quick search everywhere but inside a textarea, where ⌘K still inserts a link.
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k" && e.target.tagName !== "TEXTAREA") {
